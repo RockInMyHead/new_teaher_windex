@@ -60,9 +60,9 @@ const App = () => (
                 <Route path="/available-courses" element={<AvailableCourses />} />
                 <Route path="/lesson" element={<Lesson />} />
                 <Route path="/lesson/:lessonId" element={<LessonDetail />} />
-                <Route path="/course/:courseId" element={<CourseDetail />} />
                 <Route path="/course/:courseId/select-mode" element={<CourseDetail />} />
                 <Route path="/course/:courseId/:mode" element={<CourseDetail />} />
+                <Route path="/course/:courseId" element={<CourseDetail />} />
                 <Route path="/voice-call" element={<VoiceCallPage />} />
                 <Route path="/test-route" element={<div style={{padding: '20px', background: 'lightblue'}}><h1>Test Route</h1><p>Route works! Time: {new Date().toLocaleTimeString()}</p><button onClick={() => window.history.back()}>Go Back</button></div>} />
                 <Route path="/call" element={<VideoCall />} />

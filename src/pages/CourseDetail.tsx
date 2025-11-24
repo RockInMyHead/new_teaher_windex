@@ -668,9 +668,20 @@ export default function CourseDetail() {
     }
   };
 
+  // Redirect to select-mode if no mode is specified
   useEffect(() => {
-    loadCourse();
-  }, [courseId, currentLessonNumber]);
+    if (!mode && courseId) {
+      console.log('🔄 No mode specified, redirecting to select-mode');
+      navigate(`/course/${courseId}/select-mode`, { replace: true });
+      return;
+    }
+  }, [mode, courseId, navigate]);
+
+  useEffect(() => {
+    if (mode) { // Only load if we have a mode (prevents loading before redirect)
+      loadCourse();
+    }
+  }, [courseId, currentLessonNumber, mode]);
 
   const loadCourse = async () => {
     try {
