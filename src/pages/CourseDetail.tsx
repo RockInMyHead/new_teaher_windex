@@ -42,9 +42,13 @@ export default function CourseDetail() {
   console.log('🎯 CourseDetail rendered:', { courseId, mode, url: window.location.href });
 
   // Force select-mode for all course views (no progress page)
-  // Only redirect if mode is explicitly set and not 'select-mode'
-  if (courseId && mode && mode !== 'select-mode') {
-    console.log('🚀 Redirecting to select-mode (mode was:', mode, ')');
+  // Check URL pathname to determine if we need to redirect
+  const pathname = window.location.pathname;
+  const isSelectModeUrl = pathname.endsWith('/select-mode');
+  const isCourseUrl = /^\/course\/[^\/]+\/?$/.test(pathname); // /course/{id} or /course/{id}/
+
+  if (courseId && !isSelectModeUrl && !mode) {
+    console.log('🚀 Redirecting to select-mode (current URL:', pathname, 'mode:', mode, ')');
     navigate(`/course/${courseId}/select-mode`, { replace: true });
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
