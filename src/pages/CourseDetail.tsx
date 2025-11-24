@@ -41,6 +41,20 @@ export default function CourseDetail() {
   // Debug logging
   console.log('🎯 CourseDetail rendered:', { courseId, mode });
 
+  // Force select-mode for all course views (no progress page)
+  if (courseId && mode !== 'select-mode') {
+    console.log('🚀 Redirecting to select-mode (mode was:', mode, ')');
+    navigate(`/course/${courseId}/select-mode`, { replace: true });
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-gray-600">Открываем выбор типа обучения...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Voice call states
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [isCallActive, setIsCallActive] = useState(false);
