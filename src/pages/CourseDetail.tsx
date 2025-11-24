@@ -39,10 +39,11 @@ export default function CourseDetail() {
   const [learningPlan, setLearningPlan] = useState<any>(null);
 
   // Debug logging
-  console.log('🎯 CourseDetail rendered:', { courseId, mode });
+  console.log('🎯 CourseDetail rendered:', { courseId, mode, url: window.location.href });
 
   // Force select-mode for all course views (no progress page)
-  if (courseId && mode !== 'select-mode') {
+  // Only redirect if mode is explicitly set and not 'select-mode'
+  if (courseId && mode && mode !== 'select-mode') {
     console.log('🚀 Redirecting to select-mode (mode was:', mode, ')');
     navigate(`/course/${courseId}/select-mode`, { replace: true });
     return (
@@ -696,6 +697,13 @@ export default function CourseDetail() {
       loadCourse();
     }
   }, [courseId, currentLessonNumber, mode]);
+
+  // Debug useParams after component mounts
+  useEffect(() => {
+    console.log('🔍 useParams after mount:', { courseId, mode });
+    const url = window.location.pathname;
+    console.log('🔍 Current URL pathname:', url);
+  }, [courseId, mode]);
 
   const loadCourse = async () => {
     try {
