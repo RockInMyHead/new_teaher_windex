@@ -1347,6 +1347,23 @@ ${context}
     }
   };
 
+  // Immediate redirect if no mode specified (before any rendering)
+  if (!mode && courseId) {
+    console.log('🚀 Immediate redirect to select-mode for course:', courseId);
+    // Use setTimeout to ensure navigation happens after render
+    setTimeout(() => {
+      navigate(`/course/${courseId}/select-mode`, { replace: true });
+    }, 0);
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-gray-600">Перенаправление...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -1358,23 +1375,7 @@ ${context}
     );
   }
 
-  if (!course) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="p-8 max-w-md text-center">
-          <p className="text-lg mb-4">Курс не найден</p>
-          <Button onClick={() => navigate('/courses')}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Вернуться к курсам
-          </Button>
-        </Card>
-      </div>
-    );
-  }
-
-  const progressPercentage = course.progress;
-
-  // Если это режим выбора типа обучения
+  // Если это режим выбора типа обучения - показать страницу выбора ДО рендеринга страницы прогресса
   console.log('🔍 Checking mode for select-mode:', mode);
   if (mode === 'select-mode') {
     console.log('✅ Showing select-mode page');
