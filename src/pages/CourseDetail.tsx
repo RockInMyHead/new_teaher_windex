@@ -863,9 +863,16 @@ export default function CourseDetail() {
   };
 
   const startInteractiveLesson = async () => {
-    // Start new chat session with the teacher
-    console.log('🚀 [COURSE DETAIL] startInteractiveLesson called - starting new chat session');
-    console.log('📍 Current location:', window.location.href);
+    // Check if we're already on select-mode page - if yes, proceed directly to chat
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+
+    if (mode === 'select-mode') {
+      console.log('🚀 [COURSE DETAIL] Already on select-mode page, proceeding directly to chat');
+    } else {
+      console.log('🚀 [COURSE DETAIL] startInteractiveLesson called - starting new chat session');
+      console.log('📍 Current location:', window.location.href);
+    }
 
     // Clear any existing chat data to start fresh
     localStorage.removeItem('chatMessages');
@@ -950,16 +957,26 @@ export default function CourseDetail() {
       // Продолжаем даже если не удалось записать в БД
     }
 
-    // Navigate to chat page with lesson parameters
-    console.log('🧭 [COURSE DETAIL] Navigating to /chat with lesson parameters...');
-    const courseId = course?.id;
-    const lessonId = course?.currentLesson?.id || `lesson_${courseId}_1`;
-    navigate(`/chat?course=${courseId}&lesson=${lessonId}&mode=lesson`);
-    console.log('✅ [COURSE DETAIL] navigate() called successfully with params:', {
-      course: courseId,
-      lesson: lessonId,
-      mode: 'lesson'
-    });
+    if (mode === 'select-mode') {
+      // Already on select-mode page, proceed directly to chat
+      console.log('🧭 [COURSE DETAIL] Already on select-mode, proceeding directly to chat...');
+      const courseId = course?.id;
+      const lessonId = course?.currentLesson?.id || `lesson_${courseId}_1`;
+      navigate(`/chat?course=${courseId}&lesson=${lessonId}&mode=lesson`);
+      console.log('✅ [COURSE DETAIL] navigate() called successfully to chat:', {
+        course: courseId,
+        lesson: lessonId,
+        mode: 'lesson'
+      });
+    } else {
+      // Navigate to learning mode selection page
+      console.log('🧭 [COURSE DETAIL] Navigating to learning mode selection...');
+      const courseId = course?.id;
+      navigate(`/course/${courseId}/select-mode`);
+      console.log('✅ [COURSE DETAIL] navigate() called successfully for mode selection:', {
+        course: courseId
+      });
+    }
   };
 
   // Keep historyRef updated
@@ -1252,8 +1269,15 @@ ${context}
   };
 
   const startVoiceCall = () => {
-    // Navigate to dedicated voice call page with lesson context
-    console.log('🎯 [COURSE DETAIL] Navigating to voice-call page with lesson context');
+    // Check if we're already on select-mode page - if yes, proceed directly to voice call
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+
+    if (mode === 'select-mode') {
+      console.log('🎯 [COURSE DETAIL] Already on select-mode page, proceeding directly to voice call');
+    } else {
+      console.log('🎯 [COURSE DETAIL] Navigating to voice-call page with lesson context');
+    }
     console.log('🔍 Current course data:', {
       id: course?.id,
       title: course?.title,
@@ -1279,10 +1303,16 @@ ${context}
       grade: course?.grade
     }));
 
-    console.log('✅ Lesson data saved, navigating to /voice-call');
-
-    // Navigate to voice call page
-    navigate('/voice-call');
+    if (mode === 'select-mode') {
+      // Already on select-mode page, proceed directly to voice call
+      console.log('✅ Lesson data saved, navigating directly to /voice-call');
+      navigate('/voice-call');
+    } else {
+      // Navigate to learning mode selection page
+      console.log('✅ Lesson data saved, navigating to learning mode selection');
+      const courseId = course?.id;
+      navigate(`/course/${courseId}/select-mode`);
+    }
   };
 
   const handleCloseVideoCall = () => {
