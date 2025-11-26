@@ -150,28 +150,75 @@ export const ChatInput = React.memo(
 
     const startRecording = useCallback(async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('🎤 Starting voice recording...');
+
+        // Check if browser supports getUserMedia
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          console.error('❌ getUserMedia not supported');
+          alert('Ваш браузер не поддерживает запись голоса.');
+          return;
+        }
+
+        // Check if MediaRecorder is supported
+        if (!window.MediaRecorder) {
+          console.error('❌ MediaRecorder not supported');
+          alert('Ваш браузер не поддерживает MediaRecorder API.');
+          return;
+        }
+
+        console.log('🎤 Requesting microphone access...');
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 16000
+          }
+        });
+        console.log('✅ Microphone access granted');
         streamRef.current = stream;
 
-        const mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm;codecs=opus'
-        });
+        // Try different mime types
+        let mimeType = 'audio/webm;codecs=opus';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'audio/webm';
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'audio/mp4';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+              mimeType = ''; // Let browser choose
+            }
+          }
+        }
+
+        console.log('🎤 Using mime type:', mimeType || 'auto');
+        const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
 
         mediaRecorderRef.current = mediaRecorder;
         const chunks: Blob[] = [];
 
         mediaRecorder.ondataavailable = (event) => {
+          console.log('📦 Audio data chunk received, size:', event.data.size);
           if (event.data.size > 0) {
             chunks.push(event.data);
           }
         };
 
+        mediaRecorder.onstart = () => {
+          console.log('▶️ MediaRecorder started');
+        };
+
         mediaRecorder.onstop = async () => {
-          const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+          console.log('⏹️ MediaRecorder stopped, processing audio...');
+          const audioBlob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+          console.log('📦 Audio blob created, size:', audioBlob.size, 'type:', audioBlob.type);
           await processAudioMessage(audioBlob);
         };
 
-        mediaRecorder.start();
+        mediaRecorder.onerror = (event) => {
+          console.error('❌ MediaRecorder error:', event);
+        };
+
+        console.log('▶️ Starting MediaRecorder...');
+        mediaRecorder.start(1000); // Collect data every 1 second
         setIsRecording(true);
         setRecordingTime(0);
 
@@ -180,12 +227,36 @@ export const ChatInput = React.memo(
           setRecordingTime(prev => prev + 1);
         }, 1000);
 
-        logger.debug('Audio recording started');
+        console.log('✅ Audio recording started successfully');
+
+        // Update TTS interaction for autoplay
+        OpenAITTS.updateUserInteraction();
+
       } catch (error) {
+        console.error('❌ Failed to start recording:', error);
         logger.error('Failed to start recording', error as Error);
-        alert('Не удалось получить доступ к микрофону. Проверьте разрешения.');
+
+        if (error instanceof Error) {
+          if (error.name === 'NotAllowedError') {
+            alert('Доступ к микрофону запрещен. Разрешите доступ в настройках браузера.');
+          } else if (error.name === 'NotFoundError') {
+            alert('Микрофон не найден. Проверьте подключение микрофона.');
+          } else if (error.name === 'NotSupportedError') {
+            alert('Ваш браузер не поддерживает запись голоса.');
+          } else {
+            alert(`Ошибка записи голоса: ${error.message}`);
+          }
+        } else {
+          alert('Не удалось получить доступ к микрофону. Проверьте разрешения.');
+        }
+
+        // Reset recording state
+        setIsRecording(false);
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        }
       }
-    }, []);
+    }, [onSendMessage]);
 
     const stopRecording = useCallback(() => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
@@ -270,7 +341,9 @@ export const ChatInput = React.memo(
       };
     }, []);
 
-    const isButtonDisabled = (!message.trim() && selectedImages.length === 0 && !isRecording) || isLoading || isSending || disabled;
+    // Button is disabled only during loading/sending operations
+    // Voice recording is always available when not loading/sending
+    const isButtonDisabled = isLoading || isSending || disabled;
 
     return (
       <div className="p-4 bg-background">
@@ -337,19 +410,30 @@ export const ChatInput = React.memo(
 
           <Button
             onClick={() => {
+              console.log('🎯 Button clicked, state:', {
+                hasMessage: message.trim(),
+                isRecording,
+                isButtonDisabled,
+                disabled
+              });
+
               OpenAITTS.updateUserInteraction();
+
               if (message.trim()) {
+                console.log('📤 Sending text message');
                 handleSendMessage();
               } else if (isRecording) {
+                console.log('⏹️ Stopping recording');
                 stopRecording();
               } else {
+                console.log('🎤 Starting voice recording');
                 startRecording();
               }
             }}
-            disabled={isButtonDisabled && !isRecording}
+            disabled={isButtonDisabled}
             size="icon"
             title={message.trim() ? "Отправить (Enter)" : (isRecording ? "Остановить запись" : "Начать запись голоса")}
-            className={isRecording ? "bg-red-500 hover:bg-red-600" : ""}
+            className={isRecording ? "bg-red-500 hover:bg-red-600 animate-pulse" : ""}
           >
             {isSending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
