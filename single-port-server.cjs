@@ -769,7 +769,9 @@ function startSinglePortServer() {
           });
 
           if (!response.ok) {
-            throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
+            const errorBody = await response.text();
+            console.error('❌ OpenAI API error response:', errorBody);
+            throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorBody}`);
           }
 
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -2387,22 +2389,55 @@ grade >= 7 ?
       console.log(`🤖 [LearningProfile] Getting LLM context for user ${userId}, course ${courseId}`);
 
       // Parse courseId to get subject and level
-      const { subject, level } = parseCourseId(courseId);
-      const courseConfig = getCourseById(courseId);
-      const courseTitle = getFullCourseTitle(courseId, level);
-
-      // Get learning profile
-      const profileResult = db.prepare('SELECT * FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
-      let profile = null;
-      if (profileResult) {
-        profile = parseProfile(profileResult);
+      let subject, level;
+      try {
+        const parsed = parseCourseId(courseId);
+        subject = parsed.subject;
+        level = parsed.level;
+        console.log(`🤖 [LearningProfile] Parsed courseId: subject=${subject}, level=${level}`);
+      } catch (parseError) {
+        console.error('Error parsing courseId:', parseError);
+        subject = courseId;
+        level = 6;
       }
 
-      // Get user info
-      const userResult = db.prepare('SELECT id, username, full_name, level FROM users WHERE id = ?').get(userId);
+      let courseConfig, courseTitle;
+      try {
+        courseConfig = getCourseById(courseId);
+        courseTitle = getFullCourseTitle(courseId, level);
+        console.log(`🤖 [LearningProfile] Course config: ${courseConfig?.title || 'not found'}, title: ${courseTitle}`);
+      } catch (configError) {
+        console.error('Error getting course config:', configError);
+        courseConfig = null;
+        courseTitle = `${subject} для ${level} класса`;
+      }
+
+      // Get learning profile - with error handling
+      let profile = null;
+      try {
+        const profileResult = db.prepare('SELECT * FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+        if (profileResult) {
+          profile = parseProfile(profileResult);
+        }
+        console.log(`🤖 [LearningProfile] Profile loaded: ${profile ? 'yes' : 'no'}`);
+      } catch (profileError) {
+        console.error('Error loading profile:', profileError);
+      }
+
+      // Get user info - with error handling
       let user = null;
-      if (userResult) {
-        user = userResult;
+      try {
+        const userResult = db.prepare('SELECT id, username, first_name, last_name FROM users WHERE id = ?').get(userId);
+        if (userResult) {
+          user = {
+            ...userResult,
+            full_name: [userResult.first_name, userResult.last_name].filter(Boolean).join(' ') || userResult.username,
+            level: 1
+          };
+        }
+        console.log(`🤖 [LearningProfile] User loaded: ${user ? user.full_name : 'not found'}`);
+      } catch (userError) {
+        console.error('Error loading user:', userError);
       }
 
       // Format course info from config
@@ -2439,11 +2474,11 @@ grade >= 7 ?
         systemInstructions: generateSystemInstructions(course, profile, null)
       };
 
-      console.log(`🤖 [LearningProfile] LLM context generated for course "${courseTitle}"`);
+      console.log(`🤖 [LearningProfile] LLM context generated successfully for course "${courseTitle}"`);
       res.json(llmContext);
     } catch (error) {
-      console.error('Error generating LLM context:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      console.error('❌ Error generating LLM context:', error.message, error.stack);
+      res.status(500).json({ error: 'Internal server error', details: error.message });
     }
   });
 

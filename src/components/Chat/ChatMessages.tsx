@@ -421,14 +421,11 @@ export const ChatMessages = React.memo(
                       </div>
                       {/* Streaming status indicator */}
                       {streamingMessage.content && (
-                        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground border-t border-border/30 pt-2">
+                        <div className="mt-3 flex items-center text-xs text-muted-foreground border-t border-border/30 pt-2">
                           <div className="flex items-center gap-1">
                             <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
                             <span>ИИ пишет ответ...</span>
                           </div>
-                          <span className="opacity-60 font-mono">
-                            {streamingMessage.content.length} символов
-                          </span>
                         </div>
                       )}
 
@@ -489,13 +486,19 @@ export const ChatMessages = React.memo(
           {isLoading && (
                 <div key="loading-indicator" className="flex gap-3">
               <Avatar className="h-8 w-8 flex-shrink-0">
-                    <AvatarFallback>Ю</AvatarFallback>
+                    <AvatarFallback>
+                      <div className="flex gap-0.5">
+                        <div className="w-1 h-1 bg-muted-foreground rounded-full animate-pulse [animation-delay:0ms]"></div>
+                        <div className="w-1 h-1 bg-muted-foreground rounded-full animate-pulse [animation-delay:200ms]"></div>
+                        <div className="w-1 h-1 bg-muted-foreground rounded-full animate-pulse [animation-delay:400ms]"></div>
+                      </div>
+                    </AvatarFallback>
               </Avatar>
               <div className="rounded-lg bg-muted p-3">
                 <div className="flex gap-1">
-                    <div className="h-2 w-2 rounded-full bg-muted-foreground" />
-                    <div className="h-2 w-2 rounded-full bg-muted-foreground" />
-                    <div className="h-2 w-2 rounded-full bg-muted-foreground" />
+                    <div className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:0ms]" />
+                    <div className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:300ms]" />
+                    <div className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:600ms]" />
                 </div>
               </div>
                 </div>

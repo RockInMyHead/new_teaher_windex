@@ -23,9 +23,6 @@ const VoiceCallPage: React.FC = () => {
   const courseIdFromParams = searchParams.get('course') || '';
   const userIdFromStorage = sessionService.getUserId();
 
-  // Debug logging
-  console.log('🎯 VoiceCallPage init - courseIdFromParams:', courseIdFromParams, 'userIdFromStorage:', userIdFromStorage);
-
   // Learning profile hook - loads student profile and LLM context
   const {
     profile: learningProfile,
@@ -1063,66 +1060,97 @@ const VoiceCallPage: React.FC = () => {
   // Extract key theses from LLM response
   const extractTheses = (response: string): string[] => {
     const theses: string[] = [];
-    
+
     // Extract theses from the main teacher response (before "Ключевые тезисы" section)
-    // Split response at "Ключевые тезисы" to get only teacher explanations
     const teacherResponse = response.split(/Ключевые тезисы/i)[0].trim();
 
     if (!teacherResponse) {
       console.log('❌ No teacher response found before theses section');
       return theses;
     }
-    
+
     console.log('📚 Extracting theses from teacher response, length:', teacherResponse.length);
 
-    // Look for sentences that contain key concepts (sentences with important markers)
+    // Split into sentences and filter meaningful ones
     const sentences = teacherResponse.split(/[.!?]+/).filter(s => s.trim().length > 10);
 
-    // Extract meaningful sentences that likely contain key teachings
-    const keyIndicators = [
-      'общество', 'люди', 'связь', 'отношения', 'правила', 'ценности',
-      'группа', 'коллектив', 'вместе', 'взаимодействие', 'цели',
-      'толпа', 'собрание', 'объединение'
+    // Priority: find sentences that contain educational facts, definitions, or explanations
+    const educationalIndicators = [
+      // Факты и определения
+      'состоит', 'включает', 'является', 'называется', 'представляет собой',
+      'делится', 'разделяется', 'содержит', 'содержит', 'включает в себя',
+      // Важные понятия
+      'главное', 'основное', 'важное', 'ключевой', 'основной',
+      'центральный', 'главный', 'существенный', 'необходимый',
+      // Объяснения
+      'потому что', 'так как', 'поскольку', 'следовательно', 'значит',
+      'поэтому', 'в связи с', 'из-за', 'благодаря',
+      // География-специфические
+      'земля', 'планета', 'континент', 'океан', 'материк', 'слой', 'ядро',
+      'мантия', 'кора', 'атмосфера', 'климат', 'рельеф', 'население'
     ];
 
+    // First pass: find sentences with educational value
     for (const sentence of sentences) {
       const trimmed = sentence.trim();
-      if (trimmed.length < 20 || trimmed.length > 120) continue;
+      if (trimmed.length < 20 || trimmed.length > 150) continue;
 
-      // Check if sentence contains key teaching concepts
-      const hasKeyConcept = keyIndicators.some(indicator =>
+      // Skip generic conversational phrases
+      const skipPhrases = [
+        'конечно', 'разумеется', 'естественно', 'я могу', 'давай', 'сейчас',
+        'хорошо', 'отлично', 'прекрасно', 'замечательно', 'интересно',
+        'да', 'нет', 'может', 'возможно', 'наверное', 'вероятно'
+      ];
+
+      const hasSkipPhrase = skipPhrases.some(phrase =>
+        trimmed.toLowerCase().includes(phrase.toLowerCase())
+      );
+
+      if (hasSkipPhrase) continue;
+
+      // Check if sentence contains educational value
+      const hasEducationalValue = educationalIndicators.some(indicator =>
         trimmed.toLowerCase().includes(indicator.toLowerCase())
       );
 
-      if (hasKeyConcept && theses.length < 3) {
-        // Clean up the sentence
+      // Additional check: sentence should have some structure (contain verbs, nouns)
+      const hasStructure = /\b(есть|был|будет|имеет|содержит|включает|состоит|находится|расположен|происходит|образуется|создается|формируется)\b/i.test(trimmed);
+
+      if ((hasEducationalValue || hasStructure) && theses.length < 3) {
         let cleanSentence = trimmed
           .replace(/^[*•-]\s*/, '') // Remove bullets
           .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove markdown bold
+          .replace(/^[""''""]|[""''""]$/g, '') // Remove quotes
           .trim();
 
-        if (cleanSentence && !theses.includes(cleanSentence)) {
-          console.log('✅ Found teaching thesis:', cleanSentence);
+        // Make sure it's not too generic
+        if (cleanSentence.length >= 25 && !theses.includes(cleanSentence)) {
+          console.log('✅ Found educational thesis:', cleanSentence);
           theses.push(cleanSentence);
         }
       }
     }
 
-    // Fallback: if no key concepts found, extract first 2-3 meaningful sentences
+    // Fallback: if still no theses found, extract most informative sentences
     if (theses.length === 0) {
-      console.log('⚠️ No key concepts found, extracting meaningful sentences...');
-      for (const sentence of sentences.slice(0, 3)) {
+      console.log('⚠️ No educational theses found, extracting most informative sentences...');
+      for (const sentence of sentences) {
         const trimmed = sentence.trim();
-        if (trimmed.length >= 15 && trimmed.length <= 100) {
-          let cleanSentence = trimmed
-            .replace(/^[*•-]\s*/, '')
-            .replace(/\*\*([^*]+)\*\*/g, '$1')
-            .trim();
+        // Skip very short or very long sentences
+        if (trimmed.length < 25 || trimmed.length > 120) continue;
 
-          if (cleanSentence) {
-            console.log('✅ Found fallback thesis:', cleanSentence);
-            theses.push(cleanSentence);
-          }
+        // Skip conversational sentences
+        if (/^(давай|хорошо|понятно|ясно|отлично)/i.test(trimmed)) continue;
+
+        let cleanSentence = trimmed
+          .replace(/^[*•-]\s*/, '')
+          .replace(/\*\*([^*]+)\*\*/g, '$1')
+          .replace(/^[""''""]|[""''""]$/g, '')
+          .trim();
+
+        if (cleanSentence && theses.length < 3) {
+          console.log('✅ Found fallback thesis:', cleanSentence);
+          theses.push(cleanSentence);
         }
       }
     }
@@ -1286,7 +1314,7 @@ ${lessonContextText}
       headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
         messages: messagesForAPI,
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-5.1',
         max_completion_tokens: 200,
         temperature: 0.7
         })

@@ -217,122 +217,83 @@ export class OpenAITTS {
       const audioBuffer = await this.generateSpeech(text, options);
       console.log('✅ generateSpeech completed');
 
-      // OpenAI TTS Priority: HTML Audio first (more reliable for MP3), then Web Audio API
+      // OpenAI TTS: Web Audio API is more reliable across browsers
+      console.log('🎵 OpenAI TTS - Using Web Audio API...');
+      console.log('🎵 Audio buffer size:', audioBuffer.byteLength, 'bytes');
 
-      console.log('🎵 🎯 PRIORITY: OpenAI TTS - Using HTML Audio (more reliable for MP3)...');
+      return new Promise<void>(async (resolve) => {
+        const cleanup = () => {
+          if (this.currentAudioUrl) {
+            URL.revokeObjectURL(this.currentAudioUrl);
+            this.currentAudioUrl = null;
+          }
+        };
 
-      // Prioritize HTML Audio for better MP3 support
-      try {
-        // Fallback 1: HTML Audio for OpenAI TTS
         try {
-          const mimeType = this.getMimeType(options.format || 'mp3');
-      const blob = new Blob([audioBuffer], { type: mimeType });
-      const audioUrl = URL.createObjectURL(blob);
-      this.currentAudioUrl = audioUrl;
-      
-      this.currentAudio = new Audio();
-      this.currentAudio.src = audioUrl;
-      this.currentAudio.volume = 1.0;
-
-          return new Promise<void>((resolve) => {
-      const cleanup = () => {
-        if (this.currentAudioUrl) {
-          URL.revokeObjectURL(this.currentAudioUrl);
-          this.currentAudioUrl = null;
-        }
-      };
-
-      // Логируем метаданные аудио после загрузки
-      this.currentAudio.onloadedmetadata = () => {
-        console.log('🎵 Audio metadata loaded:', {
-          duration: this.currentAudio?.duration,
-          readyState: this.currentAudio?.readyState,
-          paused: this.currentAudio?.paused,
-          volume: this.currentAudio?.volume,
-          muted: this.currentAudio?.muted
-        });
-      };
-
-      this.currentAudio.oncanplaythrough = () => {
-        console.log('🎵 Audio can play through, duration:', this.currentAudio?.duration);
-      };
-
-      this.currentAudio.onended = () => {
-              console.log('✅ OpenAI TTS HTML Audio playback completed, played for:', this.currentAudio?.currentTime, 'seconds');
-        this.pauseVideo();
-        this.currentAudio = null;
-        cleanup();
-        resolve();
-      };
-
-            this.currentAudio.onerror = (e) => {
-              console.error('❌ HTML Audio error for OpenAI TTS:', {
-                error: e,
-                errorCode: this.currentAudio?.error?.code,
-                errorMessage: this.currentAudio?.error?.message
-              });
-              console.warn('⚠️ HTML Audio failed for OpenAI TTS, trying Web Audio API...');
-              // Fallback: Web Audio API
-              this.tryWebAudioFallback(audioBuffer, resolve, cleanup);
-            };
-
-            // Добавляем обработчик stalled (аудио застряло)
-            this.currentAudio.onstalled = () => {
-              console.warn('⚠️ Audio stalled - network issues or invalid data');
-            };
-
-            // Добавляем обработчик suspend
-            this.currentAudio.onsuspend = () => {
-              console.log('⏸️ Audio loading suspended');
-            };
-
-            // Try HTML Audio playback for OpenAI TTS
-            console.log('🎵 Attempting to play audio, current state:', {
-              readyState: this.currentAudio.readyState,
-              paused: this.currentAudio.paused,
-              duration: this.currentAudio.duration,
-              src: this.currentAudio.src.substring(0, 50)
-            });
-            
-            const playPromise = this.currentAudio.play();
-            if (playPromise) {
-              playPromise.then(() => {
-                console.log('✅ OpenAI TTS HTML Audio playback started, duration:', this.currentAudio?.duration);
-          this.playVideo();
-              }).catch((error) => {
-                console.warn('⚠️ HTML Audio play failed for OpenAI TTS:', error.message);
-                if (error.name === 'NotAllowedError') {
-                  console.warn('🚫 Autoplay blocked by browser - user interaction required');
-                  this.showAutoplayWarning();
-                  cleanup();
-                  resolve(); // Resolve anyway to not break the flow
-                  return;
-                }
-                console.warn('⚠️ HTML Audio play failed for OpenAI TTS, trying Web Audio API...');
-                // Fallback: Web Audio API
-                this.tryWebAudioFallback(audioBuffer, resolve, cleanup);
-              });
+          // Initialize AudioContext
+          if (!this.audioContext) {
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            if (!AudioContextClass) {
+              throw new Error('AudioContext not supported');
             }
+            this.audioContext = new AudioContextClass();
+            console.log('✅ AudioContext initialized, state:', this.audioContext.state);
+          }
+
+          // Ensure AudioContext is running (required after user interaction)
+          if (this.audioContext.state === 'suspended') {
+            console.log('🔄 Resuming suspended AudioContext...');
+            await this.audioContext.resume();
+            console.log('✅ AudioContext resumed, state:', this.audioContext.state);
+          }
+
+          // Make a copy of the buffer for decoding (decodeAudioData consumes the buffer)
+          const bufferCopy = audioBuffer.slice(0);
+          
+          // Decode audio buffer
+          console.log('🔄 Decoding audio buffer via Web Audio API...');
+          
+          // Use callback-based API for better Safari compatibility
+          const decodedBuffer = await new Promise<AudioBuffer>((resolveBuffer, rejectBuffer) => {
+            this.audioContext!.decodeAudioData(
+              bufferCopy,
+              (buffer) => {
+                console.log('✅ Audio decoded, duration:', buffer.duration.toFixed(2), 's, channels:', buffer.numberOfChannels);
+                resolveBuffer(buffer);
+              },
+              (error) => {
+                console.error('❌ decodeAudioData failed:', error);
+                rejectBuffer(error);
+              }
+            );
           });
 
-        } catch (htmlAudioError) {
-          console.warn('⚠️ HTML Audio setup failed for OpenAI TTS:', htmlAudioError.message);
-          console.log('🔄 OpenAI TTS: Trying Web Audio API...');
+          // Create and play using Web Audio API
+          const source = this.audioContext.createBufferSource();
+          source.buffer = decodedBuffer;
+          source.connect(this.audioContext.destination);
 
-          // Fallback: Web Audio API
-          return new Promise<void>((resolve) => {
-            this.tryWebAudioFallback(audioBuffer, resolve, () => {});
-          });
+          source.onended = () => {
+            console.log('✅ OpenAI TTS playback completed');
+            this.pauseVideo();
+            cleanup();
+            resolve();
+          };
+
+          console.log('▶️ Starting OpenAI TTS playback...');
+          source.start(0);
+          this.playVideo();
+          console.log('✅ OpenAI TTS playback started successfully!');
+
+        } catch (webAudioError: any) {
+          console.error('❌ Web Audio API error:', webAudioError.message || webAudioError);
+          console.log('🔄 OpenAI TTS failed, using browser speech synthesis...');
+          
+          // Browser speech synthesis is the only reliable fallback
+          this.fallbackToBrowserTTS(text, resolve);
+          cleanup();
         }
-      } catch (playbackError) {
-        console.warn('⚠️ OpenAI TTS playback failed:', playbackError.message);
-        console.log('🔄 OpenAI TTS: Trying Web Audio API as final attempt...');
-
-        // Final fallback: Web Audio API
-        return new Promise<void>((resolve) => {
-          this.tryWebAudioFallback(audioBuffer, resolve, () => {});
-          });
-      }
+      });
 
     } catch (error) {
       console.error('❌ OpenAI TTS error:', error);
@@ -533,32 +494,69 @@ export class OpenAITTS {
   // Final fallback to browser speech synthesis
   private static async fallbackToBrowserTTS(text: string, resolve: () => void): Promise<void> {
     try {
-      console.log('🔄 Using browser speech synthesis as final fallback...');
+      console.log('🔄 Using browser speech synthesis as fallback...');
 
-      if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'ru-RU'; // Russian language
-        utterance.rate = 0.8; // Slightly slower for clarity
-        utterance.pitch = 1.0;
-
-        utterance.onend = () => {
-          console.log('✅ Browser speech synthesis completed');
-          resolve();
-        };
-
-        utterance.onerror = (error) => {
-          console.warn('⚠️ Browser speech synthesis failed:', error);
-          resolve(); // Resolve anyway
-        };
-
-        window.speechSynthesis.speak(utterance);
-        console.log('✅ Browser speech synthesis started');
-      } else {
-        console.warn('⚠️ Speech synthesis not supported');
+      if (!('speechSynthesis' in window)) {
+        console.warn('⚠️ Speech synthesis not supported in this browser');
         resolve();
+        return;
       }
+
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ru-RU';
+      utterance.rate = 0.9;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+
+      // Find a Russian voice if available
+      const voices = window.speechSynthesis.getVoices();
+      const russianVoice = voices.find(v => v.lang.startsWith('ru'));
+      if (russianVoice) {
+        utterance.voice = russianVoice;
+        console.log('🎤 Using Russian voice:', russianVoice.name);
+      }
+
+      let resolved = false;
+      const safeResolve = () => {
+        if (!resolved) {
+          resolved = true;
+          this.pauseVideo();
+          resolve();
+        }
+      };
+
+      utterance.onstart = () => {
+        console.log('✅ Browser speech synthesis started');
+        this.playVideo();
+      };
+
+      utterance.onend = () => {
+        console.log('✅ Browser speech synthesis completed');
+        safeResolve();
+      };
+
+      utterance.onerror = (event) => {
+        console.warn('⚠️ Browser speech synthesis error:', event.error);
+        safeResolve();
+      };
+
+      // Timeout safety net
+      setTimeout(() => {
+        if (!resolved) {
+          console.warn('⚠️ Browser speech synthesis timeout');
+          window.speechSynthesis.cancel();
+          safeResolve();
+        }
+      }, 30000); // 30 second timeout
+
+      window.speechSynthesis.speak(utterance);
+
     } catch (error) {
-      console.error('❌ Browser speech synthesis error:', error);
+      console.error('❌ Browser speech synthesis setup error:', error);
+      this.pauseVideo();
       resolve();
     }
   }

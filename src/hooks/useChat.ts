@@ -369,31 +369,24 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
         const lessonChatFlag = isLessonChat;
 
         // Настройки для разных типов чата
+        // ВАЖНО: GPT-5.1 НЕ поддерживает presence_penalty и frequency_penalty!
         const chatSettings = isLessonChat ? {
           // Образовательный чат - подробные объяснения требуют больше токенов
           temperature: 0.3,
-          top_p: 0.8,
-          presence_penalty: 0.2,
-          frequency_penalty: 0.2,
           max_completion_tokens: 2000
         } : {
           // Общий чат - более креативные настройки
           temperature: 0.7,
-          top_p: 0.9,
-          presence_penalty: 0.1,
-          frequency_penalty: 0.1,
           max_completion_tokens: 2000
         };
 
         // Get AI response with streaming
+        // GPT-5.1 не поддерживает: presence_penalty, frequency_penalty, top_p
         const request: ChatCompletionRequest = {
           model,
           messages: resolvedChatMessages as any,
           max_completion_tokens: chatSettings.max_completion_tokens,
           temperature: chatSettings.temperature,
-          top_p: chatSettings.top_p,
-          presence_penalty: chatSettings.presence_penalty,
-          frequency_penalty: chatSettings.frequency_penalty,
         };
 
         console.log('🎛️ Using chat settings:', chatSettings);
