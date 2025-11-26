@@ -359,6 +359,23 @@ function startSinglePortServer() {
 
       CREATE INDEX IF NOT EXISTS idx_user_library_user_id ON user_library(user_id);
       CREATE INDEX IF NOT EXISTS idx_user_library_course_id ON user_library(course_id);
+
+      CREATE TABLE IF NOT EXISTS exam_courses (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        user_id TEXT NOT NULL,
+        exam_type TEXT NOT NULL CHECK (exam_type IN ('ЕГЭ', 'ОГЭ')),
+        subject TEXT NOT NULL,
+        progress_percentage REAL DEFAULT 0 CHECK (progress_percentage >= 0 AND progress_percentage <= 100),
+        topics_completed INTEGER DEFAULT 0,
+        total_topics INTEGER DEFAULT 50,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_studied_at TEXT,
+        UNIQUE(user_id, exam_type, subject)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_exam_courses_user_id ON exam_courses(user_id);
+      CREATE INDEX IF NOT EXISTS idx_exam_courses_exam_type ON exam_courses(exam_type);
+      CREATE INDEX IF NOT EXISTS idx_exam_courses_subject ON exam_courses(subject);
     `);
 
     // Инициализируем начальные данные
@@ -1484,28 +1501,47 @@ grade >= 7 ?
       const { userId } = req.params;
       const { examType } = req.query;
 
-      // For now, return mock data since we don't have SQLite schema for exams
-      const mockExamCourses = [
-        {
-          id: 'ЕГЭ-math-profile-1234567890',
-          user_id: userId,
-          exam_type: 'ЕГЭ',
-          subject: 'Математика (профиль)',
-          progress_percentage: 0,
-          total_topics: 50,
-          topics_completed: 0,
-          last_studied_at: new Date().toISOString(),
-          created_at: new Date().toISOString()
-        }
-      ];
+      // Получаем экзаменационные курсы из базы данных
+      let query = `
+        SELECT
+          id,
+          user_id,
+          exam_type,
+          subject,
+          progress_percentage,
+          topics_completed,
+          total_topics,
+          created_at,
+          last_studied_at
+        FROM exam_courses
+        WHERE user_id = ?
+      `;
 
-      let filteredCourses = mockExamCourses.filter(course => course.user_id === userId);
+      const params = [userId];
 
       if (examType) {
-        filteredCourses = filteredCourses.filter(course => course.exam_type === examType);
+        query += ' AND exam_type = ?';
+        params.push(examType);
       }
 
-      res.json({ examCourses: filteredCourses });
+      query += ' ORDER BY created_at DESC';
+
+      const examCourses = db.prepare(query).all(...params);
+
+      // Преобразуем данные в нужный формат для фронтенда
+      const formattedCourses = examCourses.map(course => ({
+        id: course.id,
+        userId: course.user_id,
+        examType: course.exam_type,
+        subject: course.subject,
+        progress: course.progress_percentage,
+        totalTopics: course.total_topics,
+        completedTopics: course.topics_completed,
+        lastStudied: course.last_studied_at
+      }));
+
+      console.log(`📚 Found ${formattedCourses.length} exam courses for user ${userId}`);
+      res.json({ examCourses: formattedCourses });
     } catch (error) {
       console.error('Error fetching exam courses:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -1521,22 +1557,63 @@ grade >= 7 ?
         return res.status(400).json({ error: 'Invalid request' });
       }
 
-      // For now, return success since we don't have SQLite schema for exams
-      // In production, this would insert into database
-      const insertedCourses = examCourses.map(course => ({
-        id: `${course.examType}-${course.subject.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}`,
-        user_id: userId,
-        exam_type: course.examType,
-        subject: course.subject,
-        progress_percentage: course.progress || 0,
-        total_topics: course.totalTopics || 50,
-        topics_completed: course.completedTopics || 0,
-        last_studied_at: new Date().toISOString(),
-        created_at: new Date().toISOString()
-      }));
+      // Сохраняем экзаменационные курсы в базу данных
+      const insertQuery = `
+        INSERT OR REPLACE INTO exam_courses
+        (id, user_id, exam_type, subject, progress_percentage, total_topics, topics_completed, created_at, last_studied_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
 
-      console.log('✅ Added exam courses:', insertedCourses.length);
+      const selectQuery = `
+        SELECT id, user_id, exam_type, subject, progress_percentage, topics_completed, total_topics, created_at, last_studied_at
+        FROM exam_courses
+        WHERE user_id = ? AND exam_type = ? AND subject = ?
+      `;
 
+      const insertedCourses = [];
+
+      for (const course of examCourses) {
+        try {
+          // Генерируем уникальный ID
+          const courseId = `${course.examType}-${course.subject.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+          // Сохраняем курс в базу данных
+          db.prepare(insertQuery).run(
+            courseId,
+            userId,
+            course.examType,
+            course.subject,
+            course.progress || 0,
+            course.totalTopics || 50,
+            course.completedTopics || 0,
+            new Date().toISOString(),
+            new Date().toISOString()
+          );
+
+          // Получаем сохраненный курс
+          const savedCourse = db.prepare(selectQuery).get(userId, course.examType, course.subject);
+
+          if (savedCourse) {
+            // Преобразуем в формат фронтенда
+            insertedCourses.push({
+              id: savedCourse.id,
+              userId: savedCourse.user_id,
+              examType: savedCourse.exam_type,
+              subject: savedCourse.subject,
+              progress: savedCourse.progress_percentage,
+              totalTopics: savedCourse.total_topics,
+              completedTopics: savedCourse.topics_completed,
+              lastStudied: savedCourse.last_studied_at
+            });
+          }
+
+        } catch (dbError) {
+          console.error('Error saving exam course:', course.subject, dbError);
+          // Продолжаем с другими курсами
+        }
+      }
+
+      console.log(`✅ Successfully saved ${insertedCourses.length} exam courses for user ${userId}`);
       res.status(201).json({ examCourses: insertedCourses });
     } catch (error) {
       console.error('Error creating bulk exam courses:', error);
@@ -1549,10 +1626,17 @@ grade >= 7 ?
     try {
       const { examCourseId } = req.params;
 
-      // For now, just return success since we don't have SQLite schema for exams
-      console.log('🗑️ Deleted exam course:', examCourseId);
+      // Удаляем курс из базы данных
+      const deleteQuery = 'DELETE FROM exam_courses WHERE id = ?';
+      const result = db.prepare(deleteQuery).run(examCourseId);
 
-      res.json({ message: 'Exam course deleted successfully' });
+      if (result.changes > 0) {
+        console.log('🗑️ Successfully deleted exam course:', examCourseId);
+        res.json({ message: 'Exam course deleted successfully' });
+      } else {
+        console.warn('⚠️ Exam course not found:', examCourseId);
+        res.status(404).json({ error: 'Exam course not found' });
+      }
     } catch (error) {
       console.error('Error deleting exam course:', error);
       res.status(500).json({ error: 'Internal server error' });
