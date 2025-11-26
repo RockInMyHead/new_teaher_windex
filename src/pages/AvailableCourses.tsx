@@ -313,10 +313,10 @@ const AvailableCourses = () => {
                 {selectedSubject.title}
               </h2>
               <p className="text-muted-foreground text-lg">
-                Укажите уровень обучения
+                Что вы хотите получить от обучения
               </p>
               <p className="text-sm text-muted-foreground mt-2">
-                Например: 12, A1, B2, или любой другой уровень
+                Например: подготовка к экзаменам, разговорная практика, грамматика, или ваша цель
               </p>
             </div>
 
@@ -326,7 +326,7 @@ const AvailableCourses = () => {
                 type="text"
                 value={customGrade}
                 onChange={(e) => setCustomGrade(e.target.value)}
-                placeholder="Введите уровень (например: 12, A1, B2)"
+                placeholder="Опишите вашу цель обучения"
                 className="w-full px-4 py-4 text-lg border border-border rounded-xl bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && customGrade.trim()) {
