@@ -768,7 +768,7 @@ ${baseSystemPrompt}
    - Создайте интерес к предмету
 
 5. **Что вы будете изучать** - кратко опишите:
-   - Основные разделы предмета для ${personalizedCourseData.courseInfo.grade} класса
+   - Основные разделы предмета
    - Что обычно сложно и как вы поможете разобраться
    ${llmContext?.currentLesson?.title ? `- Сегодняшняя тема: "${llmContext.currentLesson.title}"` : ''}
 
@@ -824,9 +824,13 @@ ${llmContext?.learningProfile?.currentHomework ? `
             // Check for empty response and use fallback
             if (!welcomeMessage || welcomeMessage.trim() === '') {
               console.warn('⚠️ Empty welcome message from API, using fallback');
+              // Определяем, является ли курс экзаменационным
+              const isExamCourse = personalizedCourseData.courseInfo.title?.includes('ЕГЭ') || personalizedCourseData.courseInfo.title?.includes('ОГЭ');
+              const gradeText = isExamCourse ? '' : ` для ${personalizedCourseData.courseInfo.grade} класса`;
+
               welcomeMessage = `Добро пожаловать на урок по ${personalizedCourseData.courseInfo.title}!
 
-Я Юлия, ваш учитель по предмету "${personalizedCourseData.courseInfo.title}" для ${personalizedCourseData.courseInfo.grade} класса.
+Я Юлия, ваш учитель по предмету "${personalizedCourseData.courseInfo.title}"${gradeText}.
 
 Скажите, пожалуйста:
 - Что конкретно вы хотите изучить на этом уроке?
@@ -2335,7 +2339,7 @@ ${lessonSessionData.lessonNumber > 1 && lessonSessionData.homeworks && lessonSes
 ` : ''}
 
 ВАША РОЛЬ:
-Вы - профессиональный учитель предмета "${personalizedCourseData.courseInfo.title}" для учеников ${personalizedCourseData.courseInfo.grade} класса. Ваша задача - проводить полноценные, подробные уроки, где каждый момент объясняется скрупулезно и понятно.
+Вы - профессиональный учитель предмета "${personalizedCourseData.courseInfo.title}". Ваша задача - проводить полноценные, подробные уроки, где каждый момент объясняется скрупулезно и понятно.
 
 ВАЖНЫЕ ПРАВИЛА ПРЕПОДАВАНИЯ:
 
