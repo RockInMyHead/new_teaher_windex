@@ -27,9 +27,48 @@ const addKeysToChildren = (children: React.ReactNode, prefix: string = ''): Reac
   });
 };
 
+// Препроцессор для конвертации различных форматов LaTeX в стандартный формат
+const preprocessMath = (text: string): string => {
+  let result = text;
+
+  // Конвертируем [ ... ] в $$ ... $$ (block math)
+  result = result.replace(/\[\s*\\begin\{/g, '$$\\begin{');
+  result = result.replace(/\\end\{([^}]+)\}\s*\]/g, '\\end{$1}$$');
+
+  // Конвертируем \[ ... \] в $$ ... $$ (block math)
+  result = result.replace(/\\\[/g, '$$');
+  result = result.replace(/\\\]/g, '$$');
+
+  // Конвертируем \( ... \) в $ ... $ (inline math)
+  result = result.replace(/\\\(/g, '$');
+  result = result.replace(/\\\)/g, '$');
+
+  // Исправляем неправильные разделители в cases и других окружениях
+  // Заменяем \ на \\ внутри cases (если они одинарные)
+  result = result.replace(/\\begin\{cases\}([\s\S]*?)\\end\{cases\}/g, (match, content) => {
+    // Заменяем одинарный \ перед новой строкой на \\
+    const fixedContent = content.replace(/\s*\\\s*(?=\n|$)/g, ' \\\\ ');
+    return `\\begin{cases}${fixedContent}\\end{cases}`;
+  });
+
+  // Конвертируем одиночные [ формула ] в $$ формула $$
+  result = result.replace(/\[\s*([^\[\]]+?)\s*\]/g, (match, formula) => {
+    // Проверяем, содержит ли формула LaTeX команды
+    if (formula.includes('\\') || formula.includes('^') || formula.includes('_') || formula.includes('frac')) {
+      return `$$${formula}$$`;
+    }
+    return match; // Оставляем как есть, если это не формула
+  });
+
+  return result;
+};
+
 export const MarkdownRenderer = React.memo(({ content, isStreaming = false }: MarkdownRendererProps) => {
   // Нормализуем текст для правильной обработки UTF-8
   const normalizedContent = content.normalize('NFC');
+
+  // Препроцессим математические формулы
+  const processedContent = preprocessMath(normalizedContent);
 
   return (
     <div className="prose prose-sm max-w-none dark:prose-invert">
@@ -42,7 +81,7 @@ export const MarkdownRenderer = React.memo(({ content, isStreaming = false }: Ma
           macros: {},
           trust: false
         }]]}
-        children={normalizedContent}
+        children={processedContent}
         components={{
           // Math components
           'math': ({ children }) => (
@@ -138,7 +177,7 @@ export const MarkdownRenderer = React.memo(({ content, isStreaming = false }: Ma
           ),
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );
