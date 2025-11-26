@@ -1067,36 +1067,85 @@ const VoiceCallPage: React.FC = () => {
   const extractTheses = (response: string): string[] => {
     const theses: string[] = [];
 
-    // Extract theses from the main teacher response (before "Ключевые тезисы" section)
-    const teacherResponse = response.split(/Ключевые тезисы/i)[0].trim();
+    // First, check if there's already a "Ключевые тезисы" section in the response
+    const thesesSectionMatch = response.match(/Ключевые тезисы[^\n]*\n([\s\S]*?)(?:\n\n|$)/i);
+    if (thesesSectionMatch) {
+      console.log('🎯 Found existing theses section, extracting from it...');
+      const thesesText = thesesSectionMatch[1];
+      const extractedTheses = thesesText
+        .split(/\d+\.?\s*/)
+        .filter(t => t.trim().length > 10)
+        .map(t => t.trim())
+        .filter(t => !t.match(/^(урока|занятия|темы)/i))
+        .slice(0, 3);
 
-    if (!teacherResponse) {
-      console.log('❌ No teacher response found before theses section');
-      return theses;
+      if (extractedTheses.length > 0) {
+        console.log('✅ Extracted theses from section:', extractedTheses);
+        return extractedTheses;
+      }
     }
 
-    console.log('📚 Extracting theses from teacher response, length:', teacherResponse.length);
+    // Fallback: Extract theses from the entire response (not just before "Ключевые тезисы")
+    const teacherResponse = response.trim();
+    console.log('📚 Extracting theses from full response, length:', teacherResponse.length);
 
     // Split into sentences and filter meaningful ones
     const sentences = teacherResponse.split(/[.!?]+/).filter(s => s.trim().length > 10);
 
     // Priority: find sentences that contain educational facts, definitions, or explanations
     const educationalIndicators = [
+      // География-специфические термины
+      'земля', 'планета', 'континент', 'океан', 'материк', 'остров', 'полуостров',
+      'море', 'озеро', 'река', 'гора', 'хребет', 'равнина', 'плоскогорье',
+      'климат', 'погода', 'атмосфера', 'рельеф', 'ландшафт', 'почва',
+      'население', 'народ', 'нация', 'этнос', 'культура', 'традиции',
+      'экономика', 'промышленность', 'сельское хозяйство', 'торговля',
+      'природа', 'экология', 'охрана', 'ресурсы', 'полезные ископаемые',
+      'карта', 'глобус', 'масштаб', 'координаты', 'параллели', 'меридианы',
+
       // Факты и определения
       'состоит', 'включает', 'является', 'называется', 'представляет собой',
-      'делится', 'разделяется', 'содержит', 'содержит', 'включает в себя',
+      'делится', 'разделяется', 'содержит', 'включает в себя', 'составляет',
+      'находится', 'расположен', 'простирается', 'граничит', 'омывается',
+
       // Важные понятия
       'главное', 'основное', 'важное', 'ключевой', 'основной',
-      'центральный', 'главный', 'существенный', 'необходимый',
-      // Объяснения
+      'центральный', 'главный', 'существенный', 'необходимый', 'основной',
+
+      // Объяснения и связи
       'потому что', 'так как', 'поскольку', 'следовательно', 'значит',
-      'поэтому', 'в связи с', 'из-за', 'благодаря',
-      // География-специфические
-      'земля', 'планета', 'континент', 'океан', 'материк', 'слой', 'ядро',
-      'мантия', 'кора', 'атмосфера', 'климат', 'рельеф', 'население'
+      'поэтому', 'в связи с', 'из-за', 'благодаря', 'в результате',
+
+      // Геологические и физические
+      'ядро', 'мантия', 'кора', 'слой', 'порода', 'минералы',
+      'вулкан', 'землетрясение', 'эрозия', 'выветривание',
+
+      // Климатические
+      'тропики', 'экватор', 'полюс', 'широты', 'долготы',
+      'осадки', 'температура', 'ветер', 'давление'
     ];
 
     // First pass: find sentences with educational value
+    // Also check for numbered/bulleted lists which often contain key points
+    const listItems = teacherResponse.match(/(?:\d+\.|\*\s*|-)\s*([^.!?\n]+[.!?]?)/gi) || [];
+
+    for (const listItem of listItems) {
+      const cleanItem = listItem.replace(/^\d+\.|\*\s*|-/, '').trim();
+      if (cleanItem.length > 15 && cleanItem.length < 120) {
+        // Check if it's educational
+        const hasEducationalValue = educationalIndicators.some(indicator =>
+          cleanItem.toLowerCase().includes(indicator.toLowerCase())
+        );
+
+        if (hasEducationalValue && !cleanItem.match(/^(давай|привет|меня зовут|выбери)/i)) {
+          theses.push(cleanItem);
+          console.log('✅ Found list thesis:', cleanItem);
+          if (theses.length >= 3) break;
+        }
+      }
+    }
+
+    // Continue with sentence analysis if we don't have enough theses
     for (const sentence of sentences) {
       const trimmed = sentence.trim();
       if (trimmed.length < 20 || trimmed.length > 150) continue;
@@ -1145,8 +1194,11 @@ const VoiceCallPage: React.FC = () => {
         // Skip very short or very long sentences
         if (trimmed.length < 25 || trimmed.length > 120) continue;
 
-        // Skip conversational sentences
-        if (/^(давай|хорошо|понятно|ясно|отлично)/i.test(trimmed)) continue;
+        // Skip conversational sentences and greetings
+        if (/^(давай|хорошо|понятно|ясно|отлично|привет|здравствуй|меня зовут|я юля)/i.test(trimmed)) continue;
+
+        // Skip questions and prompts
+        if (/\?|выбери|скажи|напиши|расскажи/i.test(trimmed)) continue;
 
         let cleanSentence = trimmed
           .replace(/^[*•-]\s*/, '')
