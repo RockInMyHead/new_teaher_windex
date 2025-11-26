@@ -20,6 +20,8 @@ const AvailableCourses = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
   const [showGradeModal, setShowGradeModal] = useState(false);
+  const [showCustomGradeModal, setShowCustomGradeModal] = useState(false);
+  const [customGrade, setCustomGrade] = useState('');
 
   useEffect(() => {
     const loadSubjects = async () => {
@@ -42,18 +44,22 @@ const AvailableCourses = () => {
     setShowGradeModal(true);
   };
 
-  const handleSelectGrade = async (grade: number) => {
+  const handleSelectGrade = async (grade: number | string) => {
     if (!selectedSubject) return;
 
-    const courseId = `${selectedSubject.id}-${grade}`;
-    const courseTitle = `${selectedSubject.title} для ${grade} класса`;
+    // Handle custom grades (could be text like A1, B2 or numbers like 12)
+    const gradeValue = typeof grade === 'string' ? grade : grade;
+    const courseId = `${selectedSubject.id}-${gradeValue}`;
+    const courseTitle = typeof grade === 'string'
+      ? `${selectedSubject.title} (${gradeValue} уровень)`
+      : `${selectedSubject.title} для ${grade} класса`;
 
     // Сохраняем курс в библиотеку пользователя
     const userId = user?.id || 'default_user';
     const courseData = {
       courseId,
       subject: selectedSubject.id,
-      grade,
+      grade: gradeValue,
       title: courseTitle,
       description: selectedSubject.description
     };
@@ -69,7 +75,7 @@ const AvailableCourses = () => {
           id: courseId,
           title: courseTitle,
           subject: selectedSubject.id,
-      grade: grade,
+          grade: gradeValue,
           description: selectedSubject.description,
           addedAt: new Date().toISOString()
         },
@@ -77,14 +83,14 @@ const AvailableCourses = () => {
           id: courseId,
           title: courseTitle,
           subject: selectedSubject.id,
-          grade: grade,
+          grade: gradeValue,
           description: selectedSubject.description
         },
         selectedCourseData: {
           id: courseId,
           title: courseTitle,
           subject: selectedSubject.id,
-          grade: grade,
+          grade: gradeValue,
           description: selectedSubject.description,
           addedAt: new Date().toISOString()
         }
@@ -109,6 +115,29 @@ const AvailableCourses = () => {
   const closeModal = () => {
     setShowGradeModal(false);
     setSelectedSubject(null);
+  };
+
+  const handleCustomGradeSelect = () => {
+    setShowGradeModal(false);
+    setShowCustomGradeModal(true);
+  };
+
+  const handleCustomGradeSubmit = () => {
+    if (customGrade.trim()) {
+      // Try to parse as number, otherwise use as string
+      const grade = parseInt(customGrade.trim());
+      const gradeValue = isNaN(grade) ? customGrade.trim() : grade;
+      handleSelectGrade(gradeValue);
+      setShowCustomGradeModal(false);
+      setCustomGrade('');
+      setSelectedSubject(null);
+    }
+  };
+
+  const closeCustomModal = () => {
+    setShowCustomGradeModal(false);
+    setCustomGrade('');
+    setShowGradeModal(true); // Return to grade selection
   };
 
 
@@ -240,7 +269,7 @@ const AvailableCourses = () => {
         </div>
 
             {/* Grade Buttons Grid */}
-            <div className="grid grid-cols-4 gap-4 mb-8">
+            <div className="grid grid-cols-3 gap-4 mb-6">
               {selectedSubject.levels.map((grade) => (
                 <button
                   key={grade}
@@ -252,7 +281,16 @@ const AvailableCourses = () => {
                   <span className="text-xs opacity-75">класс</span>
                 </button>
               ))}
-              </div>
+              {/* Custom Grade Button */}
+              <button
+                onClick={handleCustomGradeSelect}
+                className="bg-gradient-to-r from-secondary/20 to-secondary/30 hover:from-secondary hover:to-secondary/40 text-foreground hover:text-secondary-foreground font-bold py-5 px-3 rounded-xl transition-all duration-300 border border-secondary/30 hover:border-secondary hover:scale-105 hover:shadow-glow"
+              >
+                Другое
+                <br />
+                <span className="text-xs opacity-75">уровень</span>
+              </button>
+            </div>
 
             {/* Cancel Button */}
             <button
@@ -263,6 +301,60 @@ const AvailableCourses = () => {
             </button>
             </div>
       </div>
+      )}
+
+      {/* Custom Grade Selection Modal */}
+      {showCustomGradeModal && selectedSubject && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-3xl p-8 max-w-lg w-full border border-border shadow-glow">
+            {/* Modal Header */}
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-foreground mb-3">
+                {selectedSubject.title}
+              </h2>
+              <p className="text-muted-foreground text-lg">
+                Укажите уровень обучения
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Например: 12, A1, B2, или любой другой уровень
+              </p>
+            </div>
+
+            {/* Custom Grade Input */}
+            <div className="mb-8">
+              <input
+                type="text"
+                value={customGrade}
+                onChange={(e) => setCustomGrade(e.target.value)}
+                placeholder="Введите уровень (например: 12, A1, B2)"
+                className="w-full px-4 py-4 text-lg border border-border rounded-xl bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && customGrade.trim()) {
+                    handleCustomGradeSubmit();
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-4">
+              <button
+                onClick={handleCustomGradeSubmit}
+                disabled={!customGrade.trim()}
+                className="flex-1 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-primary-foreground font-semibold py-4 px-6 rounded-xl transition-all duration-300 shadow-glow hover:shadow-lg transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              >
+                Начать обучение
+              </button>
+              <button
+                onClick={closeCustomModal}
+                className="flex-1 bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground py-4 px-6 rounded-xl transition-colors font-medium"
+              >
+                Назад
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
