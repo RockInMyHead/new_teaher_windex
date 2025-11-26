@@ -153,7 +153,7 @@ const AvailableCourses = () => {
             Выберите предмет для изучения
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-8">
-            7 предметов • Персонализированное обучение • Все классы с 1 по 11
+            9 предметов • Персонализированное обучение • Все классы с 1 по 11
           </p>
           <div className="flex items-center justify-center gap-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
