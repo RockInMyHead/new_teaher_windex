@@ -195,7 +195,7 @@ export const ChatContainer = React.forwardRef<any, ChatContainerProps>(
             <ChatInput
               onSendMessage={handleSendMessage}
               isLoading={isLoading}
-              disabled={isInAssessment}
+              disabled={false} // Voice recording should always be available
             />
           </div>
         </div>
