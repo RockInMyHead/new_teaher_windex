@@ -153,12 +153,14 @@ const Library = () => {
                   >
                     Продолжить обучение
                   </button>
+                  {/* Кнопка оценки закомментирована
                   <button
                     onClick={() => handleViewAssessment(course)}
                     className="flex-1 bg-gradient-to-r from-secondary to-secondary/80 hover:from-secondary/90 hover:to-secondary/70 text-secondary-foreground font-semibold py-3 px-4 rounded-xl transition-all duration-300 border border-border hover:border-primary/50 text-sm"
                   >
                     📊 Оценка
                   </button>
+                  */}
                 </div>
               </div>
             ))}
