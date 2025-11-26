@@ -61,7 +61,7 @@ const VoiceCallPage: React.FC = () => {
   // Refs
   const audioStreamRef = useRef<MediaStream | null>(null);
   const isActiveRef = useRef<boolean>(false);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // videoRef removed - using CSS animated avatar instead
   // Web Speech Recognition instance
   const recognitionRef = useRef<any>(null);
 
@@ -1643,38 +1643,7 @@ ${lessonContextText}
     };
   }, []);
 
-  // Video control effect
-  useEffect(() => {
-    if (videoRef.current) {
-      if (isSpeaking) {
-        // TTS speaking - loop video
-        videoRef.current.loop = true;
-        videoRef.current.play().catch((err) => {
-          console.warn('⚠️ Video play failed:', err);
-        });
-      } else {
-        // Not speaking - pause at 00:00
-        videoRef.current.loop = false;
-        videoRef.current.pause();
-        videoRef.current.currentTime = 0;
-      }
-    }
-  }, [isSpeaking]);
-
-  // Initial video load effect
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video) {
-      // Force load video
-      video.load();
-      
-      // Try to play muted (browsers allow muted autoplay)
-      video.muted = true;
-      video.play().catch((err) => {
-        console.warn('⚠️ Initial video autoplay failed:', err);
-      });
-    }
-  }, []);
+  // Avatar animation is now CSS-based, no video control needed
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1700,34 +1669,19 @@ ${lessonContextText}
               {/* Video Avatar */}
               <div className="text-center">
                 <div className="relative inline-block">
-                  <video
-                    ref={videoRef}
-                    className="w-48 h-48 rounded-full object-cover border-4 border-gray-200 shadow-lg"
-                    muted
-                    playsInline
-                    autoPlay
-                    loop
-                    onError={(e) => {
-                      console.error('❌ Video load error:', e);
-                      // Hide video and show fallback
-                      const target = e.target as HTMLVideoElement;
-                      target.style.display = 'none';
-                      const fallback = target.nextElementSibling as HTMLElement;
-                      if (fallback) fallback.style.display = 'flex';
-                    }}
-                    onLoadedData={() => {
-                      console.log('✅ Video loaded successfully');
-                    }}
-                  >
-                    <source src="/avatar.mp4" type="video/mp4" />
-                    Ваш браузер не поддерживает видео элемент.
-                  </video>
-                  {/* Fallback avatar when video fails */}
+                  {/* Animated avatar - always visible */}
                   <div 
-                    className="w-48 h-48 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 border-4 border-gray-200 shadow-lg items-center justify-center text-white text-6xl font-bold"
-                    style={{ display: 'none' }}
+                    className="w-48 h-48 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500 border-4 border-gray-200 shadow-lg flex items-center justify-center text-white text-6xl font-bold relative overflow-hidden"
                   >
-                    Ю
+                    <span className="z-10">Ю</span>
+                    {/* Animated background when speaking */}
+                    {isSpeaking && (
+                      <div className="absolute inset-0 bg-gradient-to-br from-purple-600 via-pink-600 to-rose-600 animate-pulse" />
+                    )}
+                    {/* Listening indicator */}
+                    {isListening && (
+                      <div className="absolute inset-0 border-4 border-green-400 rounded-full animate-ping opacity-50" />
+                    )}
                   </div>
 
                   {/* Status overlay */}
