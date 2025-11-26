@@ -375,21 +375,21 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
           top_p: 0.8,
           presence_penalty: 0.2,
           frequency_penalty: 0.2,
-          max_tokens: 4000
+          max_completion_tokens: 2000
         } : {
           // Общий чат - более креативные настройки
           temperature: 0.7,
           top_p: 0.9,
           presence_penalty: 0.1,
           frequency_penalty: 0.1,
-          max_tokens: 10000
+          max_completion_tokens: 2000
         };
 
         // Get AI response with streaming
         const request: ChatCompletionRequest = {
           model,
           messages: resolvedChatMessages as any,
-          max_completion_tokens: chatSettings.max_tokens,
+          max_completion_tokens: chatSettings.max_completion_tokens,
           temperature: chatSettings.temperature,
           top_p: chatSettings.top_p,
           presence_penalty: chatSettings.presence_penalty,

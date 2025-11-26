@@ -31,10 +31,12 @@ export const ChatContainer = React.forwardRef<any, ChatContainerProps>(
       courseId,
     });
 
-    // Expose addMessage via ref for external use
+    // Expose addMessage and clearMessages via ref for external use
     React.useImperativeHandle(ref, () => ({
       addMessage,
-    }), [addMessage]);
+      clearMessages,
+      messages,
+    }), [addMessage, clearMessages, messages]);
 
 
 

@@ -295,6 +295,70 @@ function startSinglePortServer() {
       CREATE INDEX IF NOT EXISTS idx_user_lessons_user_id ON user_lessons(user_id);
       CREATE INDEX IF NOT EXISTS idx_user_lessons_lesson_id ON user_lessons(lesson_id);
       CREATE INDEX IF NOT EXISTS idx_user_lessons_status ON user_lessons(status);
+
+      -- User learning profiles table for detailed learning analytics
+      CREATE TABLE IF NOT EXISTS user_learning_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        course_id TEXT NOT NULL,
+        strong_topics TEXT, -- JSON array
+        weak_topics TEXT, -- JSON array
+        homework_history TEXT, -- JSON array
+        current_homework TEXT,
+        current_homework_assigned_at TEXT,
+        current_homework_due_at TEXT,
+        current_homework_status TEXT DEFAULT 'pending',
+        learning_style TEXT, -- visual, auditory, kinesthetic, reading
+        learning_pace TEXT DEFAULT 'normal', -- slow, normal, fast
+        current_topic_understanding INTEGER DEFAULT 5, -- 1-10 scale
+        teacher_notes TEXT, -- JSON array
+        next_lesson_recommendations TEXT,
+        subject_mastery_percentage REAL DEFAULT 0, -- 0-100
+        topics_completed INTEGER DEFAULT 0,
+        last_activity_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, course_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_learning_profiles_user_id ON user_learning_profiles(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_learning_profiles_course_id ON user_learning_profiles(course_id);
+
+      -- Lesson assessments table for storing AI-evaluated lesson grades
+      CREATE TABLE IF NOT EXISTS lesson_assessments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        course_id TEXT NOT NULL,
+        lesson_title TEXT NOT NULL,
+        lesson_topic TEXT,
+        lesson_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        duration_minutes INTEGER,
+        grade INTEGER NOT NULL CHECK (grade >= 2 AND grade <= 5),
+        llm_feedback TEXT,
+        strengths TEXT, -- JSON array
+        improvements TEXT, -- JSON array
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_lesson_assessments_user_id ON lesson_assessments(user_id);
+      CREATE INDEX IF NOT EXISTS idx_lesson_assessments_course_id ON lesson_assessments(course_id);
+      CREATE INDEX IF NOT EXISTS idx_lesson_assessments_grade ON lesson_assessments(grade);
+
+      CREATE TABLE IF NOT EXISTS user_library (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        course_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        subject TEXT,
+        grade INTEGER,
+        added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_accessed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, course_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_library_user_id ON user_library(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_library_course_id ON user_library(course_id);
     `);
 
     // Инициализируем начальные данные
@@ -581,6 +645,8 @@ function startSinglePortServer() {
     const requestStartTime = Date.now();
     console.log('📨 [BACKEND TIMING] T+0ms: Chat completions request received');
     console.log('📨 Request body:', JSON.stringify(req.body).substring(0, 500) + '...');
+    console.log('🤖 MODEL REQUESTED:', req.body.model);
+    console.log('🔑 API KEY (last 4):', process.env.OPENAI_API_KEY ? '...' + process.env.OPENAI_API_KEY.slice(-4) : 'NOT SET');
 
     // Handle Gemini models
     if (req.body.model && req.body.model.toLowerCase().includes('gemini')) {
@@ -1754,6 +1820,1029 @@ grade >= 7 ?
     } catch (error) {
       console.error('Error fetching LLM context:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ==================== SESSIONS API ROUTES ====================
+  // Library management
+  app.post('/api/sessions/library', async (req, res) => {
+    try {
+      const { userId, courseId, title, description, subject, grade } = req.body;
+
+      console.log('📚 Adding course to library:', { userId, courseId, title });
+
+      // Check if already in library
+      const existing = db.prepare('SELECT id FROM user_library WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+      if (existing) {
+        return res.json({ success: true, message: 'Course already in library' });
+      }
+
+      // Add to library
+      const result = db.prepare(`
+        INSERT INTO user_library (user_id, course_id, title, description, subject, grade, added_at, last_accessed_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).run(userId, courseId, title, description, subject, grade);
+
+      console.log('✅ Course added to library:', courseId);
+      res.json({ success: true, id: result.lastInsertRowid });
+    } catch (error) {
+      console.error('Error adding course to library:', error);
+      res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/sessions/library/:userId', async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      console.log('📚 Getting user library for:', userId);
+
+      const courses = db.prepare(`
+        SELECT id, course_id as courseId, subject, grade, title, description,
+               added_at as addedAt, last_accessed_at as lastAccessedAt
+        FROM user_library
+        WHERE user_id = ?
+        ORDER BY last_accessed_at DESC
+      `).all(userId);
+
+      console.log('✅ Library loaded:', courses.length, 'courses');
+      res.json({ courses });
+    } catch (error) {
+      console.error('Error getting user library:', error);
+      res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/sessions/library/:userId/:courseId', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+
+      console.log('📚 Removing course from library:', { userId, courseId });
+
+      const result = db.prepare('DELETE FROM user_library WHERE user_id = ? AND course_id = ?').run(userId, courseId);
+
+      if (result.changes > 0) {
+        console.log('✅ Course removed from library');
+        res.json({ success: true });
+      } else {
+        res.status(404).json({ success: false, message: 'Course not found in library' });
+      }
+    } catch (error) {
+      console.error('Error removing course from library:', error);
+      res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+  });
+
+  // ==================== LEARNING PROFILES API ROUTES ====================
+  // Import courses config for learning profiles
+  const { getAllCourses, getCourseById, getFullCourseTitle, parseCourseId } = require('./server/config/courses');
+
+  // Helper functions for learning profiles
+  function safeJsonParse(str, defaultValue) {
+    try {
+      return str ? JSON.parse(str) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  }
+
+  function parseProfile(row) {
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      userId: row.user_id,
+      courseId: row.course_id,
+      strongTopics: safeJsonParse(row.strong_topics, []),
+      weakTopics: safeJsonParse(row.weak_topics, []),
+      homeworkHistory: safeJsonParse(row.homework_history, []),
+      currentHomework: row.current_homework,
+      currentHomeworkAssignedAt: row.current_homework_assigned_at,
+      currentHomeworkDueAt: row.current_homework_due_at,
+      currentHomeworkStatus: row.current_homework_status,
+      learningStyle: row.learning_style,
+      learningPace: row.learning_pace,
+      currentTopicUnderstanding: row.current_topic_understanding,
+      teacherNotes: safeJsonParse(row.teacher_notes, []),
+      nextLessonRecommendations: row.next_lesson_recommendations,
+      subjectMasteryPercentage: row.subject_mastery_percentage,
+      topicsCompleted: row.topics_completed,
+      lastActivityAt: row.last_activity_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  function generateSystemInstructions(course, profile, currentLesson) {
+    let instructions = `Ты - профессиональный преподаватель`;
+
+    if (course) {
+      instructions += ` ${course.subject || course.title}`;
+      if (course.grade) {
+        instructions += ` для ${course.grade} класса`;
+      }
+    }
+
+    instructions += `. Ведёшь индивидуальный урок с учеником.\n\n`;
+
+    if (currentLesson) {
+      instructions += `ТЕКУЩИЙ УРОК:\n`;
+      instructions += `- Тема: ${currentLesson.title}\n`;
+      instructions += `- Раздел: ${currentLesson.topic}\n`;
+      if (currentLesson.description) {
+        instructions += `- Описание: ${currentLesson.description}\n`;
+      }
+      instructions += `\n`;
+    }
+
+    if (profile) {
+      // Информация о стиле обучения
+      if (profile.learningStyle || profile.learningPace) {
+        instructions += `ОСОБЕННОСТИ УЧЕНИКА:\n`;
+        if (profile.learningStyle) {
+          const styleDescriptions = {
+            visual: 'визуал - лучше воспринимает информацию через картинки и схемы',
+            auditory: 'аудиал - лучше воспринимает информацию на слух',
+            kinesthetic: 'кинестетик - лучше учится через практику и действия',
+            reading: 'читатель - лучше воспринимает текстовую информацию'
+          };
+          instructions += `- Стиль обучения: ${styleDescriptions[profile.learningStyle] || profile.learningStyle}\n`;
+        }
+        if (profile.learningPace) {
+          const paceDescriptions = {
+            slow: 'предпочитает медленный темп с подробными объяснениями',
+            normal: 'нормальный темп обучения',
+            fast: 'быстро усваивает материал, можно давать больше информации'
+          };
+          instructions += `- Темп: ${paceDescriptions[profile.learningPace] || profile.learningPace}\n`;
+        }
+        instructions += `\n`;
+      }
+
+      // Сильные стороны
+      if (profile.strongTopics && profile.strongTopics.length > 0) {
+        instructions += `СИЛЬНЫЕ СТОРОНЫ УЧЕНИКА:\n`;
+        profile.strongTopics.forEach(t => {
+          instructions += `- ${t.topic} (уровень владения: ${t.masteryLevel}%)\n`;
+        });
+        instructions += `\n`;
+      }
+
+      // Проблемные темы
+      if (profile.weakTopics && profile.weakTopics.length > 0) {
+        const unresolvedWeakTopics = profile.weakTopics.filter(t => !t.resolved);
+        if (unresolvedWeakTopics.length > 0) {
+          instructions += `ПРОБЛЕМНЫЕ ТЕМЫ (требуют особого внимания):\n`;
+          unresolvedWeakTopics.forEach(t => {
+            instructions += `- ${t.topic}`;
+            if (t.details) instructions += `: ${t.details}`;
+            instructions += ` [${t.severity || 'medium'}]\n`;
+          });
+          instructions += `\n`;
+        }
+      }
+
+      // Текущее ДЗ
+      if (profile.currentHomework && profile.currentHomeworkStatus === 'pending') {
+        instructions += `ТЕКУЩЕЕ ДОМАШНЕЕ ЗАДАНИЕ:\n`;
+        instructions += `${profile.currentHomework}\n`;
+        instructions += `Статус: ожидает выполнения\n\n`;
+      }
+
+      // Рекомендации
+      if (profile.nextLessonRecommendations) {
+        instructions += `РЕКОМЕНДАЦИИ ДЛЯ ЭТОГО УРОКА:\n`;
+        instructions += `${profile.nextLessonRecommendations}\n\n`;
+      }
+    }
+
+    instructions += `ВАЖНЫЕ ПРАВИЛА:\n`;
+    instructions += `1. Веди урок на русском языке\n`;
+    instructions += `2. Адаптируй сложность под уровень ученика\n`;
+    instructions += `3. Если ученик делает ошибки в проблемных темах - объясняй подробнее\n`;
+    instructions += `4. Хвали за успехи в сильных темах\n`;
+    instructions += `5. В конце урока можешь задать домашнее задание\n`;
+    instructions += `6. Отвечай кратко и по делу, но дружелюбно\n`;
+
+    return instructions;
+  }
+
+  // ==================== LEARNING PROFILES API ROUTES ====================
+
+  // GET /api/learning-profile/:userId/:courseId - Get learning profile
+  app.get('/api/learning-profile/:userId/:courseId', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+
+      console.log(`📚 [LearningProfile] Getting profile for user ${userId}, course ${courseId}`);
+
+      const profileResult = db.prepare('SELECT * FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+
+      if (!profileResult) {
+        // Create new profile if it doesn't exist
+        const result = db.prepare(
+          'INSERT INTO user_learning_profiles (user_id, course_id, last_activity_at) VALUES (?, ?, datetime(\'now\'))'
+        ).run(userId, courseId);
+
+        const newProfile = db.prepare('SELECT * FROM user_learning_profiles WHERE id = ?').get(result.lastInsertRowid);
+        return res.json({ profile: parseProfile(newProfile) });
+      }
+
+      res.json({ profile: parseProfile(profileResult) });
+    } catch (error) {
+      console.error('Error fetching learning profile:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/learning-profile/:userId/:courseId - Create/update learning profile
+  app.post('/api/learning-profile/:userId/:courseId', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+      const updates = req.body;
+
+      console.log(`📝 [LearningProfile] Updating profile for user ${userId}, course ${courseId}`);
+
+      // Check if profile exists
+      const existingProfile = db.prepare('SELECT id FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+
+      if (!existingProfile) {
+        // Create new profile
+        const result = db.prepare(`
+          INSERT INTO user_learning_profiles (
+            user_id, course_id,
+            strong_topics, weak_topics, homework_history,
+            current_homework, current_homework_status,
+            learning_style, learning_pace, current_topic_understanding,
+            teacher_notes, next_lesson_recommendations,
+            subject_mastery_percentage, topics_completed,
+            last_activity_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          userId, courseId,
+          JSON.stringify(updates.strongTopics || []),
+          JSON.stringify(updates.weakTopics || []),
+          JSON.stringify(updates.homeworkHistory || []),
+          updates.currentHomework || null,
+          updates.currentHomeworkStatus || 'pending',
+          updates.learningStyle || null,
+          updates.learningPace || 'normal',
+          updates.currentTopicUnderstanding || 5,
+          JSON.stringify(updates.teacherNotes || []),
+          updates.nextLessonRecommendations || null,
+          updates.subjectMasteryPercentage || 0,
+          updates.topicsCompleted || 0
+        );
+      } else {
+        // Update existing profile
+        const setClauses = [];
+        const values = [];
+
+        if (updates.strongTopics !== undefined) {
+          setClauses.push('strong_topics = ?');
+          values.push(JSON.stringify(updates.strongTopics));
+        }
+        if (updates.weakTopics !== undefined) {
+          setClauses.push('weak_topics = ?');
+          values.push(JSON.stringify(updates.weakTopics));
+        }
+        if (updates.homeworkHistory !== undefined) {
+          setClauses.push('homework_history = ?');
+          values.push(JSON.stringify(updates.homeworkHistory));
+        }
+        if (updates.currentHomework !== undefined) {
+          setClauses.push('current_homework = ?');
+          values.push(updates.currentHomework);
+        }
+        if (updates.currentHomeworkStatus !== undefined) {
+          setClauses.push('current_homework_status = ?');
+          values.push(updates.currentHomeworkStatus);
+        }
+        if (updates.currentHomeworkAssignedAt !== undefined) {
+          setClauses.push('current_homework_assigned_at = ?');
+          values.push(updates.currentHomeworkAssignedAt);
+        }
+        if (updates.learningStyle !== undefined) {
+          setClauses.push('learning_style = ?');
+          values.push(updates.learningStyle);
+        }
+        if (updates.learningPace !== undefined) {
+          setClauses.push('learning_pace = ?');
+          values.push(updates.learningPace);
+        }
+        if (updates.currentTopicUnderstanding !== undefined) {
+          setClauses.push('current_topic_understanding = ?');
+          values.push(updates.currentTopicUnderstanding);
+        }
+        if (updates.teacherNotes !== undefined) {
+          setClauses.push('teacher_notes = ?');
+          values.push(JSON.stringify(updates.teacherNotes));
+        }
+        if (updates.nextLessonRecommendations !== undefined) {
+          setClauses.push('next_lesson_recommendations = ?');
+          values.push(updates.nextLessonRecommendations);
+        }
+        if (updates.subjectMasteryPercentage !== undefined) {
+          setClauses.push('subject_mastery_percentage = ?');
+          values.push(updates.subjectMasteryPercentage);
+        }
+        if (updates.topicsCompleted !== undefined) {
+          setClauses.push('topics_completed = ?');
+          values.push(updates.topicsCompleted);
+        }
+
+        // Always update last_activity_at
+        setClauses.push("last_activity_at = datetime('now')");
+
+        if (setClauses.length > 0) {
+          values.push(userId, courseId);
+          db.prepare(
+            `UPDATE user_learning_profiles SET ${setClauses.join(', ')}
+             WHERE user_id = ? AND course_id = ?`
+          ).run(...values);
+        }
+      }
+
+      // Return updated profile
+      const updatedProfile = db.prepare('SELECT * FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+
+      res.json({ profile: parseProfile(updatedProfile) });
+    } catch (error) {
+      console.error('Error updating learning profile:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/learning-profile/:userId/:courseId/add-weak-topic - Add weak topic
+  app.post('/api/learning-profile/:userId/:courseId/add-weak-topic', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+      const { topic, details, severity } = req.body;
+
+      console.log(`⚠️ [LearningProfile] Adding weak topic: ${topic} for user ${userId}, course ${courseId}`);
+
+      // Get current profile
+      const profileResult = db.prepare('SELECT weak_topics FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+
+      let weakTopics = [];
+      if (profileResult && profileResult.weak_topics) {
+        weakTopics = safeJsonParse(profileResult.weak_topics, []);
+      }
+
+      // Add new weak topic
+      const newWeakTopic = {
+        topic,
+        details: details || '',
+        severity: severity || 'medium',
+        addedAt: new Date().toISOString(),
+        resolved: false
+      };
+
+      // Check if topic already exists
+      const existingIndex = weakTopics.findIndex(t => t.topic === topic);
+      if (existingIndex >= 0) {
+        weakTopics[existingIndex] = { ...weakTopics[existingIndex], ...newWeakTopic };
+      } else {
+        weakTopics.push(newWeakTopic);
+      }
+
+      // Save
+      if (!profileResult) {
+        db.prepare(
+          'INSERT INTO user_learning_profiles (user_id, course_id, weak_topics, last_activity_at) VALUES (?, ?, ?, datetime(\'now\'))'
+        ).run(userId, courseId, JSON.stringify(weakTopics));
+      } else {
+        db.prepare(
+          'UPDATE user_learning_profiles SET weak_topics = ?, last_activity_at = datetime(\'now\') WHERE user_id = ? AND course_id = ?'
+        ).run(JSON.stringify(weakTopics), userId, courseId);
+      }
+
+      res.json({ success: true, weakTopics });
+    } catch (error) {
+      console.error('Error adding weak topic:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/learning-profile/:userId/:courseId/add-strong-topic - Add strong topic
+  app.post('/api/learning-profile/:userId/:courseId/add-strong-topic', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+      const { topic, masteryLevel } = req.body;
+
+      console.log(`✅ [LearningProfile] Adding strong topic: ${topic} for user ${userId}, course ${courseId}`);
+
+      // Get current profile
+      const profileResult = db.prepare('SELECT strong_topics FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+
+      let strongTopics = [];
+      if (profileResult && profileResult.strong_topics) {
+        strongTopics = safeJsonParse(profileResult.strong_topics, []);
+      }
+
+      // Add strong topic
+      const newStrongTopic = {
+        topic,
+        masteryLevel: masteryLevel || 80,
+        addedAt: new Date().toISOString()
+      };
+
+      const existingIndex = strongTopics.findIndex(t => t.topic === topic);
+      if (existingIndex >= 0) {
+        strongTopics[existingIndex] = { ...strongTopics[existingIndex], ...newStrongTopic };
+      } else {
+        strongTopics.push(newStrongTopic);
+      }
+
+      // Save
+      if (!profileResult) {
+        db.prepare(
+          'INSERT INTO user_learning_profiles (user_id, course_id, strong_topics, last_activity_at) VALUES (?, ?, ?, datetime(\'now\'))'
+        ).run(userId, courseId, JSON.stringify(strongTopics));
+      } else {
+        db.prepare(
+          'UPDATE user_learning_profiles SET strong_topics = ?, last_activity_at = datetime(\'now\') WHERE user_id = ? AND course_id = ?'
+        ).run(JSON.stringify(strongTopics), userId, courseId);
+      }
+
+      res.json({ success: true, strongTopics });
+    } catch (error) {
+      console.error('Error adding strong topic:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/learning-profile/:userId/:courseId/assign-homework - Assign homework
+  app.post('/api/learning-profile/:userId/:courseId/assign-homework', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+      const { homework, dueAt } = req.body;
+
+      console.log(`📚 [LearningProfile] Assigning homework for user ${userId}, course ${courseId}`);
+
+      // Get current profile
+      const profileResult = db.prepare('SELECT homework_history FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+
+      let homeworkHistory = [];
+      if (profileResult && profileResult.homework_history) {
+        homeworkHistory = safeJsonParse(profileResult.homework_history, []);
+      }
+
+      // Add homework to history
+      const homeworkEntry = {
+        id: Date.now().toString(),
+        task: homework,
+        assignedAt: new Date().toISOString(),
+        dueAt: dueAt || null,
+        status: 'pending',
+        submittedAt: null,
+        feedback: null
+      };
+
+      homeworkHistory.push(homeworkEntry);
+
+      // Save
+      if (!profileResult) {
+        db.prepare(`
+          INSERT INTO user_learning_profiles (
+            user_id, course_id,
+            current_homework, current_homework_assigned_at, current_homework_due_at, current_homework_status,
+            homework_history, last_activity_at
+          ) VALUES (?, ?, ?, datetime('now'), ?, 'pending', ?, datetime('now'))
+        `).run(userId, courseId, homework, dueAt || null, JSON.stringify(homeworkHistory));
+      } else {
+        db.prepare(`
+          UPDATE user_learning_profiles SET
+           current_homework = ?,
+           current_homework_assigned_at = datetime('now'),
+           current_homework_due_at = ?,
+           current_homework_status = 'pending',
+           homework_history = ?,
+           last_activity_at = datetime('now')
+           WHERE user_id = ? AND course_id = ?
+        `).run(homework, dueAt || null, JSON.stringify(homeworkHistory), userId, courseId);
+      }
+
+      res.json({ success: true, homework: homeworkEntry });
+    } catch (error) {
+      console.error('Error assigning homework:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/learning-profile/:userId/:courseId/add-teacher-note - Add teacher note
+  app.post('/api/learning-profile/:userId/:courseId/add-teacher-note', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+      const { note, category } = req.body;
+
+      console.log(`📝 [LearningProfile] Adding teacher note for user ${userId}, course ${courseId}`);
+
+      // Get current profile
+      const profileResult = db.prepare('SELECT teacher_notes FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+
+      let teacherNotes = [];
+      if (profileResult && profileResult.teacher_notes) {
+        teacherNotes = safeJsonParse(profileResult.teacher_notes, []);
+      }
+
+      // Add note
+      const newNote = {
+        id: Date.now().toString(),
+        note,
+        category: category || 'general',
+        createdAt: new Date().toISOString()
+      };
+
+      teacherNotes.push(newNote);
+
+      // Limit to last 50 notes
+      if (teacherNotes.length > 50) {
+        teacherNotes = teacherNotes.slice(-50);
+      }
+
+      // Save
+      if (!profileResult) {
+        db.prepare(
+          'INSERT INTO user_learning_profiles (user_id, course_id, teacher_notes, last_activity_at) VALUES (?, ?, ?, datetime(\'now\'))'
+        ).run(userId, courseId, JSON.stringify(teacherNotes));
+      } else {
+        db.prepare(
+          'UPDATE user_learning_profiles SET teacher_notes = ?, last_activity_at = datetime(\'now\') WHERE user_id = ? AND course_id = ?'
+        ).run(JSON.stringify(teacherNotes), userId, courseId);
+      }
+
+      res.json({ success: true, note: newNote });
+    } catch (error) {
+      console.error('Error adding teacher note:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/learning-profile/:userId/:courseId/llm-context - Get LLM context
+  app.get('/api/learning-profile/:userId/:courseId/llm-context', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+
+      console.log(`🤖 [LearningProfile] Getting LLM context for user ${userId}, course ${courseId}`);
+
+      // Parse courseId to get subject and level
+      const { subject, level } = parseCourseId(courseId);
+      const courseConfig = getCourseById(courseId);
+      const courseTitle = getFullCourseTitle(courseId, level);
+
+      // Get learning profile
+      const profileResult = db.prepare('SELECT * FROM user_learning_profiles WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+      let profile = null;
+      if (profileResult) {
+        profile = parseProfile(profileResult);
+      }
+
+      // Get user info
+      const userResult = db.prepare('SELECT id, username, full_name, level FROM users WHERE id = ?').get(userId);
+      let user = null;
+      if (userResult) {
+        user = userResult;
+      }
+
+      // Format course info from config
+      const course = {
+        id: courseId,
+        title: courseTitle,
+        subject: courseConfig?.subject || subject,
+        grade: level,
+        description: courseConfig?.description || `Курс ${subject} для ${level} класса`
+      };
+
+      // Build LLM context
+      const llmContext = {
+        student: {
+          id: user?.id || userId,
+          name: user?.full_name || user?.username || 'Ученик',
+          level: user?.level || 1
+        },
+        course: course,
+        currentLesson: null,
+        learningProfile: profile ? {
+          strongTopics: profile.strongTopics || [],
+          weakTopics: profile.weakTopics || [],
+          currentHomework: profile.currentHomework,
+          currentHomeworkStatus: profile.currentHomeworkStatus,
+          learningStyle: profile.learningStyle,
+          learningPace: profile.learningPace,
+          currentTopicUnderstanding: profile.currentTopicUnderstanding,
+          subjectMasteryPercentage: profile.subjectMasteryPercentage,
+          recentTeacherNotes: (profile.teacherNotes || []).slice(-5),
+          nextLessonRecommendations: profile.nextLessonRecommendations,
+          topicsCompleted: profile.topicsCompleted
+        } : null,
+        systemInstructions: generateSystemInstructions(course, profile, null)
+      };
+
+      console.log(`🤖 [LearningProfile] LLM context generated for course "${courseTitle}"`);
+      res.json(llmContext);
+    } catch (error) {
+      console.error('Error generating LLM context:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/learning-profile/:userId/:courseId/assessment - Save lesson assessment
+  app.post('/api/learning-profile/:userId/:courseId/assessment', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+      const {
+        lessonTitle,
+        lessonTopic,
+        durationMinutes,
+        grade,
+        feedback,
+        strengths,
+        improvements
+      } = req.body;
+
+      console.log(`📊 [LearningProfile] Saving assessment for user ${userId}, course ${courseId}`);
+
+      // Validate required fields
+      if (!lessonTitle || !grade || grade < 2 || grade > 5) {
+        return res.status(400).json({ error: 'Missing required fields or invalid grade' });
+      }
+
+      // Insert assessment
+      const result = db.prepare(`
+        INSERT INTO lesson_assessments
+         (user_id, course_id, lesson_title, lesson_topic, duration_minutes, grade, llm_feedback, strengths, improvements)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        userId,
+        courseId,
+        lessonTitle,
+        lessonTopic || null,
+        durationMinutes || null,
+        grade,
+        feedback || null,
+        JSON.stringify(strengths || []),
+        JSON.stringify(improvements || [])
+      );
+
+      res.json({
+        success: true,
+        assessmentId: result.lastInsertRowid
+      });
+    } catch (error) {
+      console.error('Error saving lesson assessment:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/learning-profile/:userId/:courseId/assessments - Get lesson assessments
+  app.get('/api/learning-profile/:userId/:courseId/assessments', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+
+      console.log(`📊 [LearningProfile] Getting assessments for user ${userId}, course ${courseId}`);
+
+      const assessments = db.prepare(`
+        SELECT
+          id,
+          lesson_title as lessonTitle,
+          lesson_topic as lessonTopic,
+          lesson_date as lessonDate,
+          duration_minutes as durationMinutes,
+          grade,
+          llm_feedback as llmFeedback,
+          strengths,
+          improvements
+         FROM lesson_assessments
+         WHERE user_id = ? AND course_id = ?
+         ORDER BY lesson_date DESC
+      `).all(userId, courseId);
+
+      // Parse JSON fields
+      const parsedAssessments = assessments.map(row => ({
+        id: row.id,
+        lessonTitle: row.lessonTitle,
+        lessonTopic: row.lessonTopic,
+        lessonDate: row.lessonDate,
+        durationMinutes: row.durationMinutes,
+        grade: row.grade,
+        llmFeedback: row.llmFeedback,
+        strengths: safeJsonParse(row.strengths, []),
+        improvements: safeJsonParse(row.improvements, [])
+      }));
+
+      res.json({
+        assessments: parsedAssessments,
+        totalAssessments: parsedAssessments.length
+      });
+    } catch (error) {
+      console.error('Error getting lesson assessments:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/learning-profile/:userId/:courseId/stats - Get course statistics
+  app.get('/api/learning-profile/:userId/:courseId/stats', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+
+      console.log(`📊 [LearningProfile] Getting stats for user ${userId}, course ${courseId}`);
+
+      // Get all assessments for the course
+      const assessments = db.prepare(`
+        SELECT grade, duration_minutes, lesson_date
+         FROM lesson_assessments
+         WHERE user_id = ? AND course_id = ?
+         ORDER BY lesson_date DESC
+      `).all(userId, courseId);
+
+      if (assessments.length === 0) {
+        return res.json({
+          totalLessons: 0,
+          totalTime: 0,
+          averageGrade: 0,
+          grades: [],
+          recentAssessments: []
+        });
+      }
+
+      // Calculate statistics
+      const grades = assessments.map(row => row.grade);
+      const totalTime = assessments.reduce((sum, row) => sum + (row.duration_minutes || 0), 0);
+      const averageGrade = grades.reduce((sum, grade) => sum + grade, 0) / grades.length;
+
+      // Get recent assessments (last 5)
+      const recentAssessments = assessments.slice(0, 5).map(row => ({
+        grade: row.grade,
+        date: row.lesson_date
+      }));
+
+      res.json({
+        totalLessons: assessments.length,
+        totalTime: totalTime,
+        averageGrade: Math.round(averageGrade * 10) / 10,
+        grades: grades,
+        recentAssessments: recentAssessments
+      });
+    } catch (error) {
+      console.error('Error getting course stats:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ==================== LEARNING PLANS API ROUTES ====================
+
+  // POST /api/learning-plans - Create/save learning plan
+  app.post('/api/learning-plans', async (req, res) => {
+    try {
+      const { userId, courseId, subjectName, grade, planData } = req.body;
+
+      console.log(`📝 [LearningPlans] Creating/saving plan for user ${userId}, course ${courseId}`);
+
+      // Check if plan already exists
+      const existing = db.prepare('SELECT id FROM learning_plans WHERE user_id = ? AND course_id = ?').get(userId, courseId);
+
+      if (existing) {
+        // Update existing plan
+        db.prepare(`
+          UPDATE learning_plans
+          SET plan_data = ?, updated_at = datetime('now')
+          WHERE user_id = ? AND course_id = ?
+        `).run(JSON.stringify(planData), userId, courseId);
+
+        res.json({
+          success: true,
+          message: 'Learning plan updated',
+          planId: existing.id
+        });
+      } else {
+        // Create new plan
+        const result = db.prepare(`
+          INSERT INTO learning_plans (user_id, course_id, subject_name, grade, plan_data, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        `).run(userId, courseId, subjectName, grade, JSON.stringify(planData));
+
+        res.json({
+          success: true,
+          message: 'Learning plan created',
+          planId: result.lastInsertRowid
+        });
+      }
+    } catch (error) {
+      console.error('Error saving learning plan:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/learning-plans/user/:userId - Get all learning plans for user
+  app.get('/api/learning-plans/user/:userId', async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      console.log(`📚 [LearningPlans] Getting plans for user ${userId}`);
+
+      const plans = db.prepare(`
+        SELECT
+          id,
+          user_id as userId,
+          course_id as courseId,
+          subject_name as subjectName,
+          grade,
+          plan_data as planData,
+          created_at as createdAt,
+          updated_at as updatedAt
+        FROM learning_plans
+        WHERE user_id = ?
+        ORDER BY updated_at DESC
+      `).all(userId);
+
+      // Parse plan_data JSON
+      const parsedPlans = plans.map(plan => ({
+        ...plan,
+        planData: typeof plan.planData === 'string' ? JSON.parse(plan.planData) : plan.planData
+      }));
+
+      res.json({
+        plans: parsedPlans,
+        total: parsedPlans.length
+      });
+    } catch (error) {
+      console.error('Error getting user learning plans:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/learning-plans/:userId/:courseId - Get specific learning plan
+  app.get('/api/learning-plans/:userId/:courseId', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+
+      console.log(`📚 [LearningPlans] Getting plan for user ${userId}, course ${courseId}`);
+
+      const plan = db.prepare(`
+        SELECT
+          id,
+          user_id as userId,
+          course_id as courseId,
+          subject_name as subjectName,
+          grade,
+          plan_data as planData,
+          created_at as createdAt,
+          updated_at as updatedAt
+        FROM learning_plans
+        WHERE user_id = ? AND course_id = ?
+      `).get(userId, courseId);
+
+      if (!plan) {
+        return res.status(404).json({ error: 'Learning plan not found' });
+      }
+
+      // Parse plan_data JSON
+      const parsedPlan = {
+        ...plan,
+        planData: typeof plan.planData === 'string' ? JSON.parse(plan.planData) : plan.planData
+      };
+
+      res.json({
+        plan: parsedPlan
+      });
+    } catch (error) {
+      console.error('Error getting learning plan:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // DELETE /api/learning-plans/:userId/:courseId - Delete learning plan
+  app.delete('/api/learning-plans/:userId/:courseId', async (req, res) => {
+    try {
+      const { userId, courseId } = req.params;
+
+      console.log(`🗑️ [LearningPlans] Deleting plan for user ${userId}, course ${courseId}`);
+
+      const result = db.prepare('DELETE FROM learning_plans WHERE user_id = ? AND course_id = ?').run(userId, courseId);
+
+      if (result.changes > 0) {
+        res.json({ success: true, message: 'Learning plan deleted' });
+      } else {
+        res.status(404).json({ error: 'Learning plan not found' });
+      }
+    } catch (error) {
+      console.error('Error deleting learning plan:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ==================== COURSES API ROUTES ====================
+
+  // Helper function to get icon for subject
+  function getIconForSubject(subject) {
+    const icons = {
+      'english': 'Globe',
+      'russian': 'BookOpen',
+      'math': 'Calculator',
+      'physics': 'Atom',
+      'chemistry': 'Flask',
+      'biology': 'Dna',
+      'history': 'Clock',
+      'geography': 'Map',
+      'informatics': 'Code',
+      'literature': 'Book',
+      'social': 'Users',
+      'arabic': 'Globe'
+    };
+    return icons[subject] || 'BookOpen';
+  }
+
+  // GET /api/courses/subjects - Get list of available subjects
+  app.get('/api/courses/subjects', (req, res) => {
+    try {
+      console.log('📚 [Courses API] Getting subjects from config');
+      const courses = getAllCourses();
+      const subjects = courses.map(c => ({
+        id: c.id,
+        title: c.title,
+        description: c.description,
+        levels: c.levels
+      }));
+      console.log(`📚 [Courses API] Returning ${subjects.length} subjects`);
+      res.json(subjects);
+    } catch (error) {
+      console.error('Error getting subjects:', error);
+      res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+  });
+
+  // GET /api/courses - Get all courses from config (NOT from DB)
+  app.get('/api/courses', async (req, res) => {
+    try {
+      const { subject } = req.query;
+
+      console.log('📚 [Courses API] Getting all courses from config');
+
+      // Получаем курсы из конфига
+      let courses = getAllCourses();
+
+      // Фильтрация по предмету если указан
+      if (subject) {
+        courses = courses.filter(c => c.subject === subject);
+      }
+
+      // Формируем ответ с дополнительными данными для каждого уровня
+      const coursesWithLevels = [];
+      for (const course of courses) {
+        for (const level of course.levels) {
+          coursesWithLevels.push({
+            id: `${course.id}-${level}`,
+            title: getFullCourseTitle(course.id, level),
+            subject: course.subject,
+            grade: level,
+            description: course.description,
+            icon_name: getIconForSubject(course.subject),
+            is_active: true
+          });
+        }
+      }
+
+      console.log(`📚 [Courses API] Returning ${coursesWithLevels.length} courses from config`);
+      res.json(coursesWithLevels);
+    } catch (error) {
+      console.error('Error getting courses:', error);
+      res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+  });
+
+  // GET /api/courses/:courseId - Get course details from config (NOT from DB)
+  app.get('/api/courses/:courseId', async (req, res) => {
+    try {
+      const { courseId } = req.params;
+
+      console.log(`📚 [Courses API] Getting course details for: ${courseId}`);
+
+      // Парсим courseId для получения предмета и уровня
+      const { subject, level } = parseCourseId(courseId);
+      const courseConfig = getCourseById(courseId);
+
+      if (!courseConfig) {
+        console.log(`⚠️ Course not found in config: ${courseId}, creating fallback`);
+      }
+
+      // Формируем курс из конфига
+      const course = {
+        id: courseId,
+        title: getFullCourseTitle(courseId, level),
+        subject: courseConfig?.subject || subject,
+        grade: level,
+        description: courseConfig?.description || `Курс ${subject} для ${level} класса`,
+        icon_name: getIconForSubject(courseConfig?.subject || subject),
+        is_active: true,
+        levels: courseConfig?.levels || [level]
+      };
+
+      console.log(`📚 [Courses API] Returning course: "${course.title}"`);
+      res.json({ course, lessons: [] }); // Уроки генерируются динамически
+    } catch (error) {
+      console.error('Error getting course:', error);
+      res.status(500).json({ status: 'error', message: 'Internal server error' });
     }
   });
 

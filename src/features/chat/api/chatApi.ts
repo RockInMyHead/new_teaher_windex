@@ -9,7 +9,7 @@ import type { ChatMessage } from '@/types/api';
 interface ChatCompletionOptions {
   model?: string;
   temperature?: number;
-  max_tokens?: number;
+  max_completion_tokens?: number;
 }
 
 interface ChatCompletionResponse {
@@ -30,7 +30,7 @@ interface ChatCompletionResponse {
 /**
  * Send a chat completion request to the API
  * @param messages - Array of chat messages
- * @param options - Optional configuration (model, temperature, max_tokens)
+ * @param options - Optional configuration (model, temperature, max_completion_tokens)
  * @returns Promise with the assistant's response content
  */
 export async function sendChatCompletion(
@@ -38,9 +38,9 @@ export async function sendChatCompletion(
   options: ChatCompletionOptions = {}
 ): Promise<string> {
   const {
-    model = 'gpt-5.1',
+    model = 'gpt-3.5-turbo',
     temperature = 0.7,
-    max_tokens = 2000
+    max_completion_tokens = 2000
   } = options;
 
   const response = await fetch('/api/chat/completions', {
@@ -52,7 +52,7 @@ export async function sendChatCompletion(
       model,
       messages,
       temperature,
-      max_tokens
+      max_completion_tokens
     })
   });
 
@@ -107,7 +107,7 @@ export async function generateLessonPlan(
 
   const content = await sendChatCompletion(
     [{ role: 'user', content: prompt }],
-    { model: 'gpt-5.1', temperature: 0.7, max_tokens: 2000 }
+    { model: 'gpt-3.5-turbo', temperature: 0.7, max_completion_tokens: 2000 }
   );
 
   // Parse JSON from response
@@ -154,9 +154,9 @@ ${lessonContext.currentSection ? `Текущий раздел урока: ${less
   messages.push({ role: 'user', content: studentInput });
 
   return sendChatCompletion(messages, {
-    model: 'gpt-5.1',
+    model: 'gpt-3.5-turbo',
     temperature: 0.7,
-    max_tokens: 800
+    max_completion_tokens: 800
   });
 }
 
@@ -179,9 +179,9 @@ export async function processTextMessage(
   ];
 
   return sendChatCompletion(messages, {
-    model: 'gpt-5.1',
+    model: 'gpt-3.5-turbo',
     temperature: 0.7,
-    max_tokens: 500
+    max_completion_tokens: 500
   });
 }
 

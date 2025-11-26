@@ -684,68 +684,123 @@ const Chat = () => {
     // Only generate welcome message if we have lesson session data (meaning this is a lesson chat)
     // For regular chat at /chat, no welcome message should be generated
     // Also generate if we have general welcome that needs to be replaced
-    if (personalizedCourseData && lessonSessionData && isLessonMode && (messages.length === 0 || hasGeneralWelcome)) {
+    // Check if there's an old cached welcome message that needs to be replaced
+    const hasOldWelcome = messages.length > 0 && messages[0]?.role === 'assistant' && 
+      (messages[0]?.content?.includes('Добрый день!') || 
+       messages[0]?.content?.includes('Чем могу помочь?') ||
+       messages[0]?.content?.includes('Чем я могу помочь') ||
+       messages[0]?.content?.length < 400); // Old short messages
+    
+    // Wait for llmContext to load before generating welcome (for personalized experience)
+    const isContextReady = !isLoadingProfile;
+    
+    if (personalizedCourseData && lessonSessionData && isLessonMode && isContextReady && (messages.length === 0 || hasGeneralWelcome || hasOldWelcome)) {
       console.log('✅ Conditions met for lesson welcome generation:', {
         hasPersonalizedCourseData: !!personalizedCourseData,
         hasLessonSessionData: !!lessonSessionData,
         isLessonMode,
         messagesLength: messages.length,
-        hasGeneralWelcome
+        hasGeneralWelcome,
+        hasOldWelcome,
+        hasLLMContext: !!llmContext,
+        hasProfileSystemPrompt: !!profileSystemPrompt
       });
-      // Remove general welcome if it exists
-      if (hasGeneralWelcome) {
-        console.log('🗑️ Removing general welcome message to replace with lesson welcome');
+      // Remove general welcome or old cached welcome if it exists
+      if (hasGeneralWelcome || hasOldWelcome) {
+        console.log('🗑️ Removing old/general welcome message to replace with new lesson welcome');
+        // Clear messages via ChatContainer ref if available
+        if (chatContainerRef.current?.clearMessages) {
+          chatContainerRef.current.clearMessages();
+        }
         setMessages([]);
         return; // Will trigger useEffect again with empty messages
       }
 
       console.log('👋 Generating welcome message for lesson chat with course:', personalizedCourseData.courseInfo?.title || 'Unknown');
+      console.log('📚 LLM Context available:', !!llmContext);
+      console.log('📝 Profile System Prompt:', profileSystemPrompt?.substring(0, 100) || 'Not available');
 
       // Generate welcome message using AI
       const generateWelcomeMessage = async () => {
         try {
           setIsLoading(true);
 
-          const welcomePrompt = `ВАША РОЛЬ:
-Вы - учитель этого курса. Ученик пришёл к вам на индивидуальное занятие${lessonSessionData ? ` (урок ${lessonSessionData.lessonNumber})` : ''}.
+          // Формируем контекст профиля ученика для персонализации
+          const studentContext = llmContext ? `
+КОНТЕКСТ УЧЕНИКА (используйте для персонализации):
+${llmContext.student?.name ? `- Имя ученика: ${llmContext.student.name}` : ''}
+${llmContext.learningProfile?.subjectMasteryPercentage ? `- Уровень освоения предмета: ${llmContext.learningProfile.subjectMasteryPercentage}%` : ''}
+${llmContext.learningProfile?.weakTopics?.length > 0 ? `- Слабые темы (требуют внимания): ${llmContext.learningProfile.weakTopics.map((t: any) => t.topic || t).join(', ')}` : ''}
+${llmContext.learningProfile?.strongTopics?.length > 0 ? `- Сильные темы: ${llmContext.learningProfile.strongTopics.map((t: any) => t.topic || t).join(', ')}` : ''}
+${llmContext.learningProfile?.learningStyle ? `- Стиль обучения: ${llmContext.learningProfile.learningStyle}` : ''}
+${llmContext.learningProfile?.currentHomework ? `- Текущее домашнее задание: ${llmContext.learningProfile.currentHomework}` : ''}
+${llmContext.currentLesson?.title ? `- Текущий урок: ${llmContext.currentLesson.title}` : ''}
+${llmContext.currentLesson?.topic ? `- Тема урока: ${llmContext.currentLesson.topic}` : ''}
+` : '';
 
-ВАЖНАЯ ИНФОРМАЦИЯ ДЛЯ УЧЕНИКА:
-- Это интерактивное обучение с ИИ-учителем в текстовом формате
-- Одновременно доступно голосовое обучение с Юлией - естественное общение и голосовые ответы
-- Вы можете переключаться между текстовым и голосовым режимом в любое время
-- Задавайте вопросы, получайте подробные объяснения мгновенно
+          // Используем profileSystemPrompt если он есть, иначе формируем свой
+          const baseSystemPrompt = profileSystemPrompt || '';
 
-ПРИ ПЕРВОМ СООБЩЕНИИ:
-1. Поприветствуйте ученика: "Добро пожаловать на урок по ${personalizedCourseData.courseInfo.title}!"
-${lessonSessionData && lessonSessionData.lessonNumber > 1 && lessonSessionData.homeworks && lessonSessionData.homeworks.length > 0 ? `2. СРАЗУ ПРОВЕРЬТЕ ДОМАШНЕЕ ЗАДАНИЕ: Спросите про задание с прошлого урока: "${lessonSessionData.homeworks[lessonSessionData.homeworks.length - 1].task}". Попросите рассказать, как ученик его выполнил.
-3. После проверки домашнего задания разберите ошибки (если были) и похвалите за правильные части` : `2. Представьтесь как учитель по предмету "${personalizedCourseData.courseInfo.title}"
-3. Спросите, что конкретно ученик хочет изучить или какие вопросы у него есть по этому предмету`}
-${!lessonSessionData || lessonSessionData.lessonNumber === 1 ? `4. Предложите помощь с домашним заданием, объяснением темы или подготовкой к контрольной` : ''}
+          const welcomePrompt = `ВЫ - ЮЛИЯ, ПРОФЕССИОНАЛЬНЫЙ УЧИТЕЛЬ ПО ПРЕДМЕТУ "${personalizedCourseData.courseInfo.title}" ДЛЯ ${personalizedCourseData.courseInfo.grade} КЛАССА.
 
-ДОМАШНИЕ ЗАДАНИЯ:
-- В конце урока (примерно после 30-40 минут обсуждения или когда тема хорошо разобрана) дайте ученику домашнее задание
-- Домашнее задание должно быть по теме урока
-- Формулируйте четко: "Домашнее задание: [конкретное задание]"
-- Запомните это домашнее задание - на следующем уроке вы ОБЯЗАТЕЛЬНО должны его проверить!
+${baseSystemPrompt ? `СИСТЕМНЫЕ ИНСТРУКЦИИ ИЗ ПРОФИЛЯ:
+${baseSystemPrompt}
 
-ОСОБЕННОСТИ ВАШЕГО СТИЛЯ:
-- Объясняйте сложное простыми словами, как если бы разговаривали с учеником ${personalizedCourseData.courseInfo.grade} класса
-- Используйте примеры из реальной жизни и аналогии
-- Разбивайте информацию на логические блоки
-- Задавайте наводящие вопросы для проверки понимания
-- Будьте терпеливы, поддерживающи и мотивирующи
-- Адаптируйте объяснения под уровень ученика
-- Поощряйте самостоятельное мышление
-- Хвалите за правильные ответы и старания
+` : ''}${studentContext}
 
-ПОМНИТЕ:
-- Вы учитель по предмету "${personalizedCourseData.courseInfo.title}", поэтому все объяснения должны быть в контексте этого предмета
-- Это урок ${lessonSessionData ? `номер ${lessonSessionData.lessonNumber}` : ''}
-${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛЬНО начните с проверки домашнего задания!' : ''}
-- В конце урока дайте домашнее задание
-- Спрашивайте, что конкретно нужно изучить, чтобы помочь максимально эффективно
+Это индивидуальное занятие${lessonSessionData ? ` (урок ${lessonSessionData.lessonNumber})` : ''}.
 
-Приветствуйте ученика и начните урок!`;
+ВАША ЗАДАЧА - НАПИСАТЬ РАЗВЁРНУТОЕ, ТЁПЛОЕ И МОТИВИРУЮЩЕЕ ПРИВЕТСТВИЕ ДЛЯ УЧЕНИКА.
+
+ОБЯЗАТЕЛЬНО ВКЛЮЧИТЕ В ПРИВЕТСТВИЕ:
+
+1. **Тёплое приветствие** - поприветствуйте ученика по-дружески${llmContext?.student?.name ? ` (по имени: ${llmContext.student.name})` : ''}, создайте атмосферу доверия
+
+2. **Представьтесь** - скажите, что вы Юлия, учитель по ${personalizedCourseData.courseInfo.title}
+
+3. **Персонализация** (если есть данные о профиле ученика):
+   ${llmContext?.learningProfile?.weakTopics?.length > 0 ? `- Упомяните, что вы помните о сложных темах и готовы помочь с ними` : '- Спросите, какие темы даются сложнее всего'}
+   ${llmContext?.learningProfile?.strongTopics?.length > 0 ? `- Похвалите за успехи в сильных темах` : ''}
+
+4. **Мотивация к обучению** - расскажите, почему ${personalizedCourseData.courseInfo.title} - это интересно и полезно:
+   - Приведите 2-3 интересных факта или примера из жизни
+   - Объясните, где эти знания пригодятся
+   - Создайте интерес к предмету
+
+5. **Что вы будете изучать** - кратко опишите:
+   - Основные разделы предмета для ${personalizedCourseData.courseInfo.grade} класса
+   - Что обычно сложно и как вы поможете разобраться
+   ${llmContext?.currentLesson?.title ? `- Сегодняшняя тема: "${llmContext.currentLesson.title}"` : ''}
+
+6. **Предложите варианты** - спросите у ученика, что он хочет изучить:
+   - Помощь с домашним заданием
+   - Объяснение сложной темы
+   - Подготовка к контрольной или экзамену
+   - Разбор конкретного правила или задачи
+   - Повторение пройденного материала
+
+7. **Поддержка и мотивация** - скажите, что:
+   - Вы объясните любую тему простыми словами
+   - Будете терпеливы и поможете разобраться
+   - Ученик может задавать любые вопросы
+
+${lessonSessionData && lessonSessionData.lessonNumber > 1 && lessonSessionData.homeworks && lessonSessionData.homeworks.length > 0 ? `
+ВАЖНО! На прошлом уроке было задано домашнее задание: "${lessonSessionData.homeworks[lessonSessionData.homeworks.length - 1].task}"
+Обязательно упомяните это и спросите, как ученик справился с заданием!` : ''}
+
+${llmContext?.learningProfile?.currentHomework ? `
+ВАЖНО! У ученика есть текущее домашнее задание: "${llmContext.learningProfile.currentHomework}"
+Спросите, как идёт выполнение!` : ''}
+
+СТИЛЬ НАПИСАНИЯ:
+- Используйте эмодзи для оживления текста (📚, ✨, 🎯, 💡, 🌟 и т.д.)
+- Пишите дружелюбно, но профессионально
+- Используйте списки и структурированный текст
+- Обращайтесь на "ты" к ученику
+- Будьте энергичны и позитивны
+- Если есть данные о профиле ученика - используйте их для персонализации!
+
+Напишите приветствие длиной 400-600 слов. Сделайте его информативным, полезным, персонализированным и мотивирующим!`;
 
           const response = await fetch('/api/chat/completions', {
             method: 'POST',
@@ -757,7 +812,7 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
               ],
               model: 'gpt-5.1',
               temperature: 0.7,
-              max_completion_tokens: 200
+              max_completion_tokens: 2000
             })
           });
 
@@ -831,7 +886,7 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
 
       generateWelcomeMessage();
     }
-  }, [personalizedCourseData, lessonSessionData, messages, isLessonMode]);
+  }, [personalizedCourseData, lessonSessionData, messages, isLessonMode, llmContext, profileSystemPrompt, isLoadingProfile]);
 
   // Generate general welcome message for plain chat (no course context)
   useEffect(() => {
@@ -1571,7 +1626,7 @@ ${context}
               ],
               model: 'gpt-5.1',
               temperature: 0.7,
-          max_tokens: 300
+          max_completion_tokens: 300
             })
           });
 
@@ -1667,7 +1722,7 @@ ${context}
               ],
               model: 'gpt-5.1',
           temperature: 0.7,
-          max_tokens: 300
+          max_completion_tokens: 300
             })
           });
 
@@ -1883,7 +1938,7 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
         ],
           model: 'gpt-5.1',
           temperature: 0.7,
-          max_tokens: 300
+          max_completion_tokens: 300
         })
       });
 

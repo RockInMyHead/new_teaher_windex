@@ -1286,7 +1286,7 @@ ${lessonContextText}
       headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
         messages: messagesForAPI,
-        model: 'gpt-5.1',
+        model: 'gpt-3.5-turbo',
         max_completion_tokens: 200,
         temperature: 0.7
         })
