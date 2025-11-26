@@ -165,8 +165,8 @@ export class OpenAITTS {
       this.onPlaybackComplete = resolve;
       
       // Запускаем параллельную генерацию всех предложений
-      const generationPromises = sentences.map((sentence, index) => 
-        this.generateSentenceAudio(sentence, index, options)
+      const generationPromises = sentences.map((sentence, index) =>
+        this.generateSentenceAudio(sentence, index, sentences.length, options)
       );
       
       // Обрабатываем результаты по мере готовности
@@ -282,8 +282,9 @@ export class OpenAITTS {
    * Генерирует аудио для одного предложения
    */
   private static async generateSentenceAudio(
-    sentence: string, 
-    index: number, 
+    sentence: string,
+    index: number,
+    totalSentences: number,
     options: TTSOptions
   ): Promise<AudioQueueItem | null> {
     try {
@@ -293,7 +294,7 @@ export class OpenAITTS {
 
       // Логируем только первое предложение для скорости
       if (index === 0) {
-        console.log(`🎤 Generating TTS for ${sentences.length} sentences...`);
+        console.log(`🎤 Generating TTS for ${totalSentences} sentences...`);
       }
       
       // Декодируем в AudioBuffer
