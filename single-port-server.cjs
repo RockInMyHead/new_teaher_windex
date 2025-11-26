@@ -828,6 +828,19 @@ function startSinglePortServer() {
       } else {
         // Handle regular response
         console.log('⏱️ [BACKEND TIMING] T+' + (Date.now() - requestStartTime) + 'ms: Starting OpenAI API call');
+        
+        // Ensure max_completion_tokens is properly set for GPT-5.1
+        const requestData = {
+          ...req.body,
+          // GPT-5.1 requires max_completion_tokens, not max_tokens
+          max_completion_tokens: req.body.max_completion_tokens || req.body.max_tokens || 2000
+        };
+        // Remove max_tokens if present (GPT-5.1 doesn't support it)
+        delete requestData.max_tokens;
+        
+        console.log('📤 [LLM REQUEST] max_completion_tokens:', requestData.max_completion_tokens);
+        console.log('📤 [LLM REQUEST] model:', requestData.model);
+        
         const responseOutput = await curlWithProxy('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -836,7 +849,7 @@ function startSinglePortServer() {
             'User-Agent': 'curl/7.68.0',
             'Accept': '*/*'
           },
-          data: req.body
+          data: requestData
         });
 
         // Check if response is empty
