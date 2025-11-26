@@ -1240,8 +1240,8 @@ const VoiceCallPage: React.FC = () => {
     // Build system prompt like in Chat.tsx
     const buildSystemPrompt = () => {
       // Получаем название курса из конфига
-      const courseTitle = getFullCourseTitle(courseIdFromParams || 'general', 0);
-      const { subject } = parseCourseId(courseIdFromParams || 'general');
+      const { subject, level } = parseCourseId(courseIdFromParams || 'general');
+      const courseTitle = getFullCourseTitle(courseIdFromParams || 'general', level);
       const courseConfig = getCourseById(subject);
 
       // Для экзаменационных курсов используем специальный формат промпта

@@ -353,7 +353,7 @@ const Chat = () => {
     if (isTtsEnabled && messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       // Only auto-speak assistant messages, not user messages, and only if not already speaking
-      if (lastMessage.role === 'assistant' && !lastMessage.ttsPlayed && !OpenAITTS.isPlaying()) {
+      if (lastMessage.role === 'assistant' && !lastMessage.ttsPlayed && !OpenAITTS.isPlayingAudio()) {
         // Mark as played to avoid re-playing
         lastMessage.ttsPlayed = true;
         OpenAITTS.speak(lastMessage.content, { voice: 'nova', speed: 1.0 }); // Use OpenAI TTS
@@ -1415,8 +1415,8 @@ ${llmContext?.learningProfile?.currentHomework ? `
           // Build system prompt with learning profile context
           const buildSystemPrompt = () => {
             // Получаем название курса из конфига
-            const courseTitle = getFullCourseTitle(courseIdFromParams || 'general', 0);
-            const { subject } = parseCourseId(courseIdFromParams || 'general');
+            const { subject, level } = parseCourseId(courseIdFromParams || 'general');
+            const courseTitle = getFullCourseTitle(courseIdFromParams || 'general', level);
             const courseConfig = getCourseById(subject);
 
             // Для экзаменационных курсов используем специальный формат промпта
