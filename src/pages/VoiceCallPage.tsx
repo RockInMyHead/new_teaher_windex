@@ -1649,8 +1649,10 @@ ${lessonContextText}
       if (isSpeaking) {
         // TTS speaking - loop video
         videoRef.current.loop = true;
-        videoRef.current.play().catch(console.error);
-    } else {
+        videoRef.current.play().catch((err) => {
+          console.warn('⚠️ Video play failed:', err);
+        });
+      } else {
         // Not speaking - pause at 00:00
         videoRef.current.loop = false;
         videoRef.current.pause();
@@ -1658,6 +1660,21 @@ ${lessonContextText}
       }
     }
   }, [isSpeaking]);
+
+  // Initial video load effect
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      // Force load video
+      video.load();
+      
+      // Try to play muted (browsers allow muted autoplay)
+      video.muted = true;
+      video.play().catch((err) => {
+        console.warn('⚠️ Initial video autoplay failed:', err);
+      });
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1690,10 +1707,28 @@ ${lessonContextText}
                     playsInline
                     autoPlay
                     loop
+                    onError={(e) => {
+                      console.error('❌ Video load error:', e);
+                      // Hide video and show fallback
+                      const target = e.target as HTMLVideoElement;
+                      target.style.display = 'none';
+                      const fallback = target.nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                    onLoadedData={() => {
+                      console.log('✅ Video loaded successfully');
+                    }}
                   >
                     <source src="/avatar.mp4" type="video/mp4" />
                     Ваш браузер не поддерживает видео элемент.
                   </video>
+                  {/* Fallback avatar when video fails */}
+                  <div 
+                    className="w-48 h-48 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 border-4 border-gray-200 shadow-lg items-center justify-center text-white text-6xl font-bold"
+                    style={{ display: 'none' }}
+                  >
+                    Ю
+                  </div>
 
                   {/* Status overlay */}
                   <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 bg-white px-3 py-1 rounded-full shadow-md border">
