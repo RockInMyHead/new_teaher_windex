@@ -1063,158 +1063,166 @@ const VoiceCallPage: React.FC = () => {
       .trim();
   };
 
-  // Extract key theses from LLM response
+  // Extract key theses from LLM response - ONLY facts, definitions, and key educational points
   const extractTheses = (response: string): string[] => {
     const theses: string[] = [];
-
-    // First, check if there's already a "Ключевые тезисы" section in the response
-    const thesesSectionMatch = response.match(/Ключевые тезисы[^\n]*\n([\s\S]*?)(?:\n\n|$)/i);
-    if (thesesSectionMatch) {
-      console.log('🎯 Found existing theses section, extracting from it...');
-      const thesesText = thesesSectionMatch[1];
-      const extractedTheses = thesesText
-        .split(/\d+\.?\s*/)
-        .filter(t => t.trim().length > 10)
-        .map(t => t.trim())
-        .filter(t => !t.match(/^(урока|занятия|темы)/i))
-        .slice(0, 3);
-
-      if (extractedTheses.length > 0) {
-        console.log('✅ Extracted theses from section:', extractedTheses);
-        return extractedTheses;
-      }
-    }
-
-    // Fallback: Extract theses from the entire response (not just before "Ключевые тезисы")
+    
+    // Clean the response
     const teacherResponse = response.trim();
-    console.log('📚 Extracting theses from full response, length:', teacherResponse.length);
 
-    // Split into sentences and filter meaningful ones
-    const sentences = teacherResponse.split(/[.!?]+/).filter(s => s.trim().length > 10);
+    // Split into sentences (only by periods, not by ? or !)
+    // This helps avoid extracting questions
+    const sentences = teacherResponse
+      .split(/(?<=[.!])\s+/)
+      .filter(s => s.trim().length > 15);
 
-    // Priority: find sentences that contain educational facts, definitions, or explanations
-    const educationalIndicators = [
-      // География-специфические термины
-      'земля', 'планета', 'континент', 'океан', 'материк', 'остров', 'полуостров',
-      'море', 'озеро', 'река', 'гора', 'хребет', 'равнина', 'плоскогорье',
-      'климат', 'погода', 'атмосфера', 'рельеф', 'ландшафт', 'почва',
-      'население', 'народ', 'нация', 'этнос', 'культура', 'традиции',
-      'экономика', 'промышленность', 'сельское хозяйство', 'торговля',
-      'природа', 'экология', 'охрана', 'ресурсы', 'полезные ископаемые',
-      'карта', 'глобус', 'масштаб', 'координаты', 'параллели', 'меридианы',
-
-      // Факты и определения
-      'состоит', 'включает', 'является', 'называется', 'представляет собой',
-      'делится', 'разделяется', 'содержит', 'включает в себя', 'составляет',
-      'находится', 'расположен', 'простирается', 'граничит', 'омывается',
-
-      // Важные понятия
-      'главное', 'основное', 'важное', 'ключевой', 'основной',
-      'центральный', 'главный', 'существенный', 'необходимый', 'основной',
-
-      // Объяснения и связи
-      'потому что', 'так как', 'поскольку', 'следовательно', 'значит',
-      'поэтому', 'в связи с', 'из-за', 'благодаря', 'в результате',
-
-      // Геологические и физические
-      'ядро', 'мантия', 'кора', 'слой', 'порода', 'минералы',
-      'вулкан', 'землетрясение', 'эрозия', 'выветривание',
-
-      // Климатические
-      'тропики', 'экватор', 'полюс', 'широты', 'долготы',
-      'осадки', 'температура', 'ветер', 'давление'
+    // Patterns that indicate DEFINITIONS and FACTS (high priority)
+    const definitionPatterns = [
+      /это\s+.{10,}/i,                          // "X - это Y"
+      /называется?\s+.{5,}/i,                   // "называется X"
+      /является\s+.{5,}/i,                      // "является X"
+      /представляет\s+собой\s+.{5,}/i,         // "представляет собой X"
+      /состоит\s+из\s+.{5,}/i,                  // "состоит из X"
+      /включает\s+.{5,}/i,                      // "включает X"
+      /делится\s+на\s+.{5,}/i,                  // "делится на X"
+      /имеет\s+.{5,}/i,                         // "имеет X"
+      /содержит\s+.{5,}/i,                      // "содержит X"
+      /расположен[а]?\s+.{5,}/i,               // "расположен X"
+      /находится\s+.{5,}/i,                     // "находится X"
+      /омывается\s+.{5,}/i,                     // "омывается X"
+      /граничит\s+с\s+.{5,}/i,                  // "граничит с X"
+      /занимает\s+.{5,}/i,                      // "занимает X"
+      /составляет\s+.{5,}/i,                    // "составляет X"
+      /равен[а]?\s+.{3,}/i,                     // "равен X"
+      /насчитывает\s+.{3,}/i,                   // "насчитывает X"
+      /существует\s+.{5,}/i,                    // "существует X"
+      /образуется\s+.{5,}/i,                    // "образуется X"
+      /формируется\s+.{5,}/i,                   // "формируется X"
+      /происходит\s+.{5,}/i,                    // "происходит X"
     ];
 
-    // First pass: find sentences with educational value
-    // Also check for numbered/bulleted lists which often contain key points
-    const listItems = teacherResponse.match(/(?:\d+\.|\*\s*|-)\s*([^.!?\n]+[.!?]?)/gi) || [];
+    // Phrases to SKIP (questions, conversational, prompts)
+    const skipPatterns = [
+      /\?/,                                      // Any question
+      /слышал\s+ли/i,                           // "слышал ли"
+      /знаешь\s+ли/i,                           // "знаешь ли"
+      /можешь\s+ли/i,                           // "можешь ли"
+      /хочешь\s+ли/i,                           // "хочешь ли"
+      /^давай/i,                                 // "давай..."
+      /^хорошо/i,                               // "хорошо..."
+      /^отлично/i,                              // "отлично..."
+      /^прекрасно/i,                            // "прекрасно..."
+      /^замечательно/i,                         // "замечательно..."
+      /^привет/i,                               // "привет..."
+      /^здравствуй/i,                           // "здравствуй..."
+      /меня\s+зовут/i,                          // "меня зовут..."
+      /я\s+(юля|юлия|твой|ваш)/i,              // "я Юля/твой учитель"
+      /выбери/i,                                // "выбери..."
+      /скажи/i,                                 // "скажи..."
+      /напиши/i,                                // "напиши..."
+      /расскажи/i,                              // "расскажи..."
+      /попробуй/i,                              // "попробуй..."
+      /подумай/i,                               // "подумай..."
+      /конечно/i,                               // "конечно..."
+      /разумеется/i,                            // "разумеется..."
+      /готов[а]?\s+начать/i,                   // "готов начать"
+      /рад[а]?\s+что/i,                         // "рада что"
+      /интересно/i,                             // "интересно..."
+      /как\s+ты\s+думаешь/i,                   // "как ты думаешь"
+      /что\s+ты\s+знаешь/i,                    // "что ты знаешь"
+      /например/i,                              // "например" at start often leads to examples, not definitions
+      /^если/i,                                 // "если..."
+      /^когда/i,                                // "когда..."
+    ];
 
-    for (const listItem of listItems) {
-      const cleanItem = listItem.replace(/^\d+\.|\*\s*|-/, '').trim();
-      if (cleanItem.length > 15 && cleanItem.length < 120) {
-        // Check if it's educational
-        const hasEducationalValue = educationalIndicators.some(indicator =>
-          cleanItem.toLowerCase().includes(indicator.toLowerCase())
-        );
-
-        if (hasEducationalValue && !cleanItem.match(/^(давай|привет|меня зовут|выбери)/i)) {
-          theses.push(cleanItem);
-          console.log('✅ Found list thesis:', cleanItem);
-          if (theses.length >= 3) break;
-        }
-      }
-    }
-
-    // Continue with sentence analysis if we don't have enough theses
+    // First pass: find sentences with DEFINITIONS (highest quality theses)
     for (const sentence of sentences) {
       const trimmed = sentence.trim();
-      if (trimmed.length < 20 || trimmed.length > 150) continue;
+      if (trimmed.length < 30 || trimmed.length > 200) continue;
 
-      // Skip generic conversational phrases
-      const skipPhrases = [
-        'конечно', 'разумеется', 'естественно', 'я могу', 'давай', 'сейчас',
-        'хорошо', 'отлично', 'прекрасно', 'замечательно', 'интересно',
-        'да', 'нет', 'может', 'возможно', 'наверное', 'вероятно'
-      ];
+      // Skip if matches any skip pattern
+      const shouldSkip = skipPatterns.some(pattern => pattern.test(trimmed));
+      if (shouldSkip) continue;
 
-      const hasSkipPhrase = skipPhrases.some(phrase =>
-        trimmed.toLowerCase().includes(phrase.toLowerCase())
-      );
+      // Check if it's a definition
+      const isDefinition = definitionPatterns.some(pattern => pattern.test(trimmed));
 
-      if (hasSkipPhrase) continue;
-
-      // Check if sentence contains educational value
-      const hasEducationalValue = educationalIndicators.some(indicator =>
-        trimmed.toLowerCase().includes(indicator.toLowerCase())
-      );
-
-      // Additional check: sentence should have some structure (contain verbs, nouns)
-      const hasStructure = /\b(есть|был|будет|имеет|содержит|включает|состоит|находится|расположен|происходит|образуется|создается|формируется)\b/i.test(trimmed);
-
-      if ((hasEducationalValue || hasStructure) && theses.length < 3) {
-        let cleanSentence = trimmed
-          .replace(/^[*•-]\s*/, '') // Remove bullets
-          .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove markdown bold
-          .replace(/^[""''""]|[""''""]$/g, '') // Remove quotes
-          .trim();
-
-        // Make sure it's not too generic
-        if (cleanSentence.length >= 25 && !theses.includes(cleanSentence)) {
-          console.log('✅ Found educational thesis:', cleanSentence);
-          theses.push(cleanSentence);
-        }
-      }
-    }
-
-    // Fallback: if still no theses found, extract most informative sentences
-    if (theses.length === 0) {
-      console.log('⚠️ No educational theses found, extracting most informative sentences...');
-      for (const sentence of sentences) {
-        const trimmed = sentence.trim();
-        // Skip very short or very long sentences
-        if (trimmed.length < 25 || trimmed.length > 120) continue;
-
-        // Skip conversational sentences and greetings
-        if (/^(давай|хорошо|понятно|ясно|отлично|привет|здравствуй|меня зовут|я юля)/i.test(trimmed)) continue;
-
-        // Skip questions and prompts
-        if (/\?|выбери|скажи|напиши|расскажи/i.test(trimmed)) continue;
-
+      if (isDefinition && theses.length < 3) {
         let cleanSentence = trimmed
           .replace(/^[*•-]\s*/, '')
           .replace(/\*\*([^*]+)\*\*/g, '$1')
           .replace(/^[""''""]|[""''""]$/g, '')
+          .replace(/^\d+\.\s*/, '')
           .trim();
 
-        if (cleanSentence && theses.length < 3) {
-          console.log('✅ Found fallback thesis:', cleanSentence);
+        // Remove trailing punctuation if needed
+        cleanSentence = cleanSentence.replace(/[.!]+$/, '').trim();
+
+        if (cleanSentence.length >= 25 && !theses.includes(cleanSentence)) {
           theses.push(cleanSentence);
         }
       }
     }
 
-    console.log('📌 Total teaching theses extracted:', theses.length);
-    return theses.slice(0, 3); // Max 3 theses
+    // Second pass: look for numbered/bulleted educational facts
+    if (theses.length < 3) {
+      const listItems = teacherResponse.match(/(?:\d+\.|\*\s*|-)\s*([^.!?\n]{20,})/gi) || [];
+
+      for (const listItem of listItems) {
+        if (theses.length >= 3) break;
+
+        const cleanItem = listItem.replace(/^\d+\.|\*\s*|-/, '').trim();
+        if (cleanItem.length < 25 || cleanItem.length > 150) continue;
+
+        // Skip if matches any skip pattern
+        const shouldSkip = skipPatterns.some(pattern => pattern.test(cleanItem));
+        if (shouldSkip) continue;
+
+        // Check if it contains educational content
+        const hasDefinition = definitionPatterns.some(pattern => pattern.test(cleanItem));
+
+        if (hasDefinition && !theses.includes(cleanItem)) {
+          theses.push(cleanItem.replace(/[.!]+$/, '').trim());
+        }
+      }
+    }
+
+    // Third pass: extract any remaining factual statements
+    if (theses.length < 3) {
+      // Look for sentences with numbers/statistics (often factual)
+      const factualPatterns = [
+        /\d+\s*(км|м|млн|тыс|процент|%|градус|год|век|лет)/i,
+        /самый\s+(большой|маленький|высокий|низкий|длинный|короткий|глубокий)/i,
+        /крупнейший|важнейший|главный|основной/i,
+      ];
+
+      for (const sentence of sentences) {
+        if (theses.length >= 3) break;
+
+        const trimmed = sentence.trim();
+        if (trimmed.length < 25 || trimmed.length > 150) continue;
+
+        const shouldSkip = skipPatterns.some(pattern => pattern.test(trimmed));
+        if (shouldSkip) continue;
+
+        const isFactual = factualPatterns.some(pattern => pattern.test(trimmed));
+
+        if (isFactual) {
+          const cleanSentence = trimmed
+            .replace(/^[*•-]\s*/, '')
+            .replace(/\*\*([^*]+)\*\*/g, '$1')
+            .replace(/^\d+\.\s*/, '')
+            .replace(/[.!]+$/, '')
+            .trim();
+
+          if (cleanSentence.length >= 25 && !theses.includes(cleanSentence)) {
+            theses.push(cleanSentence);
+          }
+        }
+      }
+    }
+
+    return theses.slice(0, 3);
   };
 
   // Get LLM response using GPT-5.1
@@ -1409,13 +1417,13 @@ ${lessonContextText}
       // и последовательного воспроизведения предложений
       await OpenAITTS.speakStreaming(text, {
         voice: 'nova',
-        model: 'tts-1',
+          model: 'tts-1',
         speed: 1.0
       });
       
       console.log('✅ TTS streaming complete');
       setAudioBlocked(false);
-      
+
     } catch (error) {
       console.error('❌ TTS streaming error, using fallback:', error);
       setAudioBlocked(true);
@@ -1423,22 +1431,22 @@ ${lessonContextText}
       // Fallback to browser TTS
       return new Promise((resolve) => {
         if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.lang = 'ru-RU';
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ru-RU';
           utterance.rate = 0.9;
           utterance.pitch = 1.0;
 
-          utterance.onend = () => {
-            console.log('✅ Browser TTS complete');
-            resolve();
-          };
+        utterance.onend = () => {
+          console.log('✅ Browser TTS complete');
+          resolve();
+        };
 
           utterance.onerror = (error) => {
             console.error('❌ Browser TTS error:', error);
             resolve();
           };
 
-          window.speechSynthesis.speak(utterance);
+        window.speechSynthesis.speak(utterance);
         } else {
           console.warn('⚠️ Speech synthesis not available');
           resolve();
