@@ -80,19 +80,8 @@ export class OpenAITTS {
       format = 'mp3' // MP3 - максимальная совместимость со всеми браузерами
     } = options;
 
-    console.log('🎤 generateSpeech called:', {
-      textLength: text.length,
-      textPreview: text.substring(0, 50) + '...',
-      voice,
-      speed,
-      model
-    });
-
     // Преобразуем цифры в слова и удаляем ударения (знаки +)
     const processedText = this.cleanTextForTTS(replaceNumbersInText(text));
-    console.log('📝 Original text:', text.substring(0, 100) + '...');
-    console.log('📝 Processed text:', processedText.substring(0, 100) + '...');
-    console.log('📝 Text changed:', text !== processedText);
 
     console.log('📡 Fetching TTS from:', `${window.location.origin}/api/audio/speech`);
     const response = await fetch(`${window.location.origin}/api/audio/speech`, {
@@ -298,13 +287,14 @@ export class OpenAITTS {
     options: TTSOptions
   ): Promise<AudioQueueItem | null> {
     try {
-      console.log(`🎤 Generating audio for sentence ${index + 1}: "${sentence.substring(0, 30)}..."`);
-      
       const startTime = Date.now();
       const arrayBuffer = await this.generateSpeech(sentence, options);
       const generationTime = Date.now() - startTime;
-      
-      console.log(`✅ Sentence ${index + 1} generated in ${generationTime}ms, size: ${arrayBuffer.byteLength} bytes`);
+
+      // Логируем только первое предложение для скорости
+      if (index === 0) {
+        console.log(`🎤 Generating TTS for ${sentences.length} sentences...`);
+      }
       
       // Декодируем в AudioBuffer
       if (!this.audioContext) {
@@ -362,9 +352,18 @@ export class OpenAITTS {
       try {
         const source = this.audioContext.createBufferSource();
         source.buffer = buffer;
-        source.connect(this.audioContext.destination);
+        
+        // Create GainNode for volume control
+        const gainNode = this.audioContext.createGain();
+        gainNode.gain.value = 1.0; // Full volume
+        
+        // Connect: source -> gain -> destination
+        source.connect(gainNode);
+        gainNode.connect(this.audioContext.destination);
         
         this.currentSource = source;
+        
+        console.log(`🔊 Playing audio chunk: ${buffer.duration.toFixed(2)}s, gain: ${gainNode.gain.value}`);
         
         source.onended = () => {
           this.currentSource = null;
@@ -534,22 +533,39 @@ export class OpenAITTS {
             );
           });
 
-          // Create and play using Web Audio API
+          // Create and play using Web Audio API with GainNode for volume control
           const source = this.audioContext.createBufferSource();
           source.buffer = decodedBuffer;
-          source.connect(this.audioContext.destination);
+          
+          // Create GainNode for volume control (ensure full volume)
+          const gainNode = this.audioContext.createGain();
+          gainNode.gain.value = 1.0; // Full volume
+          
+          // Connect: source -> gain -> destination
+          source.connect(gainNode);
+          gainNode.connect(this.audioContext.destination);
+          
+          // Store source for stop functionality
+          this.currentSource = source;
 
           source.onended = () => {
             console.log('✅ OpenAI TTS playback completed');
+            this.currentSource = null;
             this.pauseVideo();
             cleanup();
             resolve();
           };
 
           console.log('▶️ Starting OpenAI TTS playback...');
+          console.log('🔊 AudioContext state:', this.audioContext.state);
+          console.log('🔊 AudioContext sampleRate:', this.audioContext.sampleRate);
+          console.log('🔊 GainNode value:', gainNode.gain.value);
+          console.log('🔊 Audio duration:', decodedBuffer.duration.toFixed(2), 'seconds');
+          
           source.start(0);
           this.playVideo();
           console.log('✅ OpenAI TTS playback started successfully!');
+          console.log('💡 If you cannot hear audio, check: 1) System volume 2) Browser tab muted 3) Audio output device');
 
         } catch (webAudioError: any) {
           console.error('❌ Web Audio API error:', webAudioError.message || webAudioError);

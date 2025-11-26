@@ -373,8 +373,7 @@ const VoiceCallPage: React.FC = () => {
 
       recognition.onstart = () => {
         console.log('🎙️ Web Speech Recognition started');
-        // Interrupt any currently playing TTS when user starts speaking
-        stopTTS();
+        // TTS will be stopped automatically when new speech starts
       };
 
       recognition.onresult = async (event) => {
@@ -1277,7 +1276,7 @@ ${lessonContextText}
 
     // Final check: if we still don't have course context, try to load it synchronously
     if (!effectiveLLMContext?.course && courseIdFromParams && userIdFromStorage) {
-      console.log('🚨 No course context available, attempting synchronous load...');
+      // Attempting synchronous load...
       try {
         // Try to get context from learning profile service directly
         const directContext = await learningProfileService.getLLMContext(userIdFromStorage, courseIdFromParams);
@@ -1518,8 +1517,9 @@ ${lessonContextText}
       while (attempts < maxAttempts && (isLoadingProfile || !llmContext || !llmContext?.course)) {
         await new Promise(resolve => setTimeout(resolve, 100));
         attempts++;
-        if (attempts % 10 === 0) { // Log every 1 second instead of every 0.5
-          console.log(`⏳ Still waiting... (attempt ${attempts}/${maxAttempts}) - Loading: ${isLoadingProfile}, LLM Context: ${!!llmContext}, Course: ${!!llmContext?.course}, Profile: ${!!llmContext?.learningProfile}`);
+        // Логируем только один раз на 20-й попытке (каждые 2 секунды)
+        if (attempts === 20) {
+          console.log('⏳ Loading context...');
         }
       }
 
