@@ -26,9 +26,18 @@ export const ChatContainer = React.forwardRef<any, ChatContainerProps>(
     courseId
   }: ChatContainerProps, ref) => {
     // State management - pass courseId for per-course chat history
-    const { messages, isLoading, sendMessage: sendChatMessage, error: chatError, addMessage, streamingMessage, clearMessages } = useChat({
+    const [chatError, setChatError] = React.useState<string | null>(null);
+    const { messages, isLoading, sendMessage: sendChatMessage, error: hookError, addMessage, streamingMessage, clearMessages } = useChat({
       maxMessages,
       courseId,
+      onError: (error) => {
+        // Handle OpenAI quota exceeded error
+        if (error.code === 'QUOTA_EXCEEDED') {
+          setChatError('Извините, но лимит использования ИИ превышен. Пожалуйста, свяжитесь с администратором для пополнения баланса OpenAI API.');
+        } else {
+          setChatError(error.message || 'Произошла ошибка при отправке сообщения');
+        }
+      },
     });
 
     // Expose addMessage and clearMessages via ref for external use
@@ -143,7 +152,7 @@ export const ChatContainer = React.forwardRef<any, ChatContainerProps>(
               <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0" />
               <div>
                 <p className="font-medium text-destructive">Ошибка</p>
-                <p className="text-sm text-destructive/80">{chatError.message}</p>
+                <p className="text-sm text-destructive/80">{chatError}</p>
               </div>
             </div>
           </div>

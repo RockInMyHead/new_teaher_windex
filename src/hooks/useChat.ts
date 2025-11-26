@@ -402,7 +402,21 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
         let chunkBuffer = '';
         let lastUpdateTime = Date.now();
 
-        await chatService.sendMessageStream(request, (chunk: string) => {
+        // Add cache-busting timestamp to ensure latest code is used
+        const requestWithCacheBust = {
+          ...request,
+          _cache_bust: Date.now(),
+          _force_no_params: true // Additional flag to ensure no old params
+        };
+
+        // Explicitly remove any unsupported parameters that might be present
+        delete requestWithCacheBust.top_p;
+        delete requestWithCacheBust.presence_penalty;
+        delete requestWithCacheBust.frequency_penalty;
+
+        console.log('📤 [USE CHAT] Sending request to chatService:', JSON.stringify(requestWithCacheBust, null, 2));
+
+        await chatService.sendMessageStream(requestWithCacheBust, (chunk: string) => {
           console.log('📦 Received chunk:', chunk, `(length: ${chunk.length})`);
           chunkBuffer += chunk;
 

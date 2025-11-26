@@ -88,12 +88,16 @@ export class ChatService {
         getTimeoutDuration('STREAMING_API_CALL')
       );
 
+      // Log request for debugging
+      const requestBody = { ...request, stream: true };
+      console.log('🚀 [CHAT SERVICE] Sending streaming request:', JSON.stringify(requestBody, null, 2));
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ...request, stream: true }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 

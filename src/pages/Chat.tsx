@@ -862,6 +862,40 @@ ${llmContext?.learningProfile?.currentHomework ? `
             }
           } else {
             console.error('❌ Failed to generate welcome message, status:', response.status);
+
+            // Check for OpenAI quota exceeded
+            let isQuotaExceeded = false;
+            if (response.status === 500) {
+              try {
+                const errorData = await response.json().catch(() => ({}));
+                if (errorData.error?.code === 'insufficient_quota' || errorData.error?.type === 'insufficient_quota') {
+                  isQuotaExceeded = true;
+                }
+              } catch (parseError) {
+                // Ignore parse error
+              }
+            }
+
+            if (isQuotaExceeded) {
+              console.warn('⚠️ OpenAI quota exceeded during welcome message generation');
+              const quotaMessage = 'Извините, но лимит использования ИИ превышен. Пожалуйста, свяжитесь с администратором для пополнения баланса OpenAI API.';
+
+              const quotaMessageObj: Message = {
+                id: `quota-error-${Date.now()}`,
+                role: 'assistant',
+                content: quotaMessage,
+                timestamp: new Date(),
+                ttsPlayed: false
+              };
+
+              if (chatContainerRef.current?.addMessage) {
+                chatContainerRef.current.addMessage(quotaMessageObj);
+              } else {
+                setMessages([quotaMessageObj]);
+              }
+              return;
+            }
+
             // Use fallback on error
             const fallbackMessage = `Добро пожаловать на урок по ${personalizedCourseData.courseInfo.title}!
 
@@ -883,6 +917,27 @@ ${llmContext?.learningProfile?.currentHomework ? `
           }
         } catch (error) {
           console.error('❌ Error generating welcome message:', error);
+
+          // Handle OpenAI quota exceeded error
+          if (error.message === 'OPENAI_QUOTA_EXCEEDED') {
+            console.warn('⚠️ OpenAI quota exceeded during welcome message generation');
+            const quotaMessage = 'Извините, но лимит использования ИИ превышен. Пожалуйста, свяжитесь с администратором для пополнения баланса OpenAI API.';
+
+            const quotaMessageObj: Message = {
+              id: `quota-error-${Date.now()}`,
+              role: 'assistant',
+              content: quotaMessage,
+              timestamp: new Date(),
+              ttsPlayed: false
+            };
+
+            if (chatContainerRef.current?.addMessage) {
+              chatContainerRef.current.addMessage(quotaMessageObj);
+            } else {
+              setMessages([quotaMessageObj]);
+            }
+            return;
+          }
         } finally {
           setIsLoading(false);
         }
@@ -1009,11 +1064,15 @@ ${llmContext?.learningProfile?.currentHomework ? `
       console.log('📥 API response status:', response.status);
 
       if (!response.ok) {
-        // Handle specific API key error
+        // Handle specific API errors
         if (response.status === 500) {
           const errorData = await response.json().catch(() => ({}));
           if (errorData.message && errorData.message.includes('OpenAI API key not properly configured')) {
             throw new Error('OpenAI API ключ не настроен. Пожалуйста, настройте правильный API ключ в файле .env');
+          }
+          // Handle OpenAI quota exceeded
+          if (errorData.error?.code === 'insufficient_quota' || errorData.error?.type === 'insufficient_quota') {
+            throw new Error('OPENAI_QUOTA_EXCEEDED');
           }
         }
         throw new Error(`API request failed: ${response.status}`);
@@ -1514,10 +1573,7 @@ ${context}
 
           console.log('⏱️ [TIMING] T+' + (Date.now() - startTime) + 'ms: Prompt prepared, starting API call');
 
-          const response = await fetch('/api/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+          const requestBody = {
               messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: `Ученик только что сказал: "${textToSend}". Продолжи урок.` }
@@ -1525,7 +1581,14 @@ ${context}
               model: 'gpt-5.1',
               temperature: 0.7,
               max_completion_tokens: 300
-            }),
+            };
+
+          console.log('📤 [CHAT PAGE] Sending completion request:', JSON.stringify(requestBody, null, 2));
+
+          const response = await fetch('/api/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
             signal: controller.signal
           });
 

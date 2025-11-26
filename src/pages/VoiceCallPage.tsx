@@ -741,6 +741,25 @@ const VoiceCallPage: React.FC = () => {
       
     } catch (error) {
       console.error('❌ Handle speech transcript error:', error);
+
+      // Handle OpenAI quota exceeded error
+      if (error.message === 'OPENAI_QUOTA_EXCEEDED') {
+        console.warn('⚠️ OpenAI quota exceeded during speech processing, showing user-friendly message');
+        const quotaMessage = 'Извините, но лимит использования ИИ превышен. Пожалуйста, свяжитесь с администратором для пополнения баланса OpenAI API.';
+
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: quotaMessage,
+          timestamp: new Date()
+        }]);
+
+        setIsProcessing(false);
+        setIsSpeaking(true);
+        await speakText(quotaMessage);
+        setIsSpeaking(false);
+        return;
+      }
+
       setIsProcessing(false);
       setIsSpeaking(false);
       // Try to restart listening
@@ -793,6 +812,25 @@ const VoiceCallPage: React.FC = () => {
       console.log('✅ Welcome message sent');
     } catch (error) {
       console.error('❌ Error sending welcome message:', error);
+
+      // Handle OpenAI quota exceeded error
+      if (error.message === 'OPENAI_QUOTA_EXCEEDED') {
+        console.warn('⚠️ OpenAI quota exceeded, showing user-friendly message');
+        const quotaMessage = 'Извините, но лимит использования ИИ превышен. Пожалуйста, свяжитесь с администратором для пополнения баланса OpenAI API.';
+
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: quotaMessage,
+          timestamp: new Date()
+        }]);
+
+        setIsProcessing(false);
+        setIsSpeaking(true);
+        await speakText(quotaMessage);
+        setIsSpeaking(false);
+        return;
+      }
+
       setIsProcessing(false);
     }
   };
@@ -1461,22 +1499,40 @@ ${userMessage ? `УЧЕНИК СКАЗАЛ: "${userMessage}"
     ];
 
     // GPT-5.1 НЕ поддерживает: top_p, presence_penalty, frequency_penalty
-    const response = await fetch('/api/chat/completions', {
-        method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+    const requestBody = {
         messages: messagesForAPI,
         model: 'gpt-5.1',
         max_completion_tokens: 800,
         temperature: 0.6
-        })
+      };
+
+    console.log('📤 [VOICE CALL PAGE] Sending completion request:', JSON.stringify(requestBody, null, 2));
+
+    const response = await fetch('/api/chat/completions', {
+        method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      console.error('❌ Voice chat LLM request failed:', response.status, errorText);
-      throw new Error('Voice chat LLM failed');
-    }
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.error('❌ Voice chat LLM request failed:', response.status, errorText);
+
+        // Handle specific OpenAI errors
+        try {
+          const errorData = JSON.parse(errorText);
+          if (errorData?.error?.code === 'insufficient_quota') {
+            throw new Error('OPENAI_QUOTA_EXCEEDED');
+          }
+          if (errorData?.error?.type === 'insufficient_quota') {
+            throw new Error('OPENAI_QUOTA_EXCEEDED');
+          }
+        } catch (parseError) {
+          // If not JSON or not quota error, continue with generic error
+        }
+
+        throw new Error('Voice chat LLM failed');
+      }
 
       const result = await response.json();
       console.log('📥 LLM API response:', JSON.stringify(result).substring(0, 300));

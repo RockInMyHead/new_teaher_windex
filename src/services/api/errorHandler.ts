@@ -95,6 +95,9 @@ const inferErrorCode = (message: string): AppErrorCode => {
   if (lowerMessage.includes('validation') || lowerMessage.includes('invalid')) {
     return 'VALIDATION_ERROR';
   }
+  if (lowerMessage.includes('quota') || lowerMessage.includes('insufficient_quota')) {
+    return 'QUOTA_EXCEEDED';
+  }
 
   return 'UNKNOWN_ERROR';
 };
@@ -123,6 +126,7 @@ const inferErrorStatus = (code: AppErrorCode): number => {
     AUTH_ERROR: 401,
     NOT_FOUND: 404,
     TIMEOUT: 408,
+    QUOTA_EXCEEDED: 429,
     UNKNOWN_ERROR: 500,
   };
 
@@ -182,6 +186,7 @@ export const getUserFriendlyErrorMessage = (error: AppError | unknown): string =
       AUTH_ERROR: getErrorMessage('AUTH_ERROR'),
       NOT_FOUND: getErrorMessage('NOT_FOUND'),
       VALIDATION_ERROR: getErrorMessage('VALIDATION_ERROR'),
+      QUOTA_EXCEEDED: 'Лимит использования ИИ превышен. Пожалуйста, свяжитесь с администратором для пополнения баланса.',
     };
 
     return friendlyMap[error.code] || error.message || getErrorMessage('UNKNOWN_ERROR');
