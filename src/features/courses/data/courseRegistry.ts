@@ -52,6 +52,24 @@ export const COURSE_REGISTRY: CourseRegistryEntry[] = [
     totalLessons: 160,
     dataPath: 'russian'
   },
+  {
+    id: 4,
+    title: 'Арабский язык',
+    subject: 'arabic',
+    grades: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    description: 'Изучение арабского языка: алфавит, грамматика, разговорная практика',
+    totalLessons: 150,
+    dataPath: 'arabic'
+  },
+  {
+    id: 5,
+    title: 'Китайский язык',
+    subject: 'chinese',
+    grades: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    description: 'Изучение китайского языка: иероглифы, грамматика, разговорная практика',
+    totalLessons: 150,
+    dataPath: 'chinese'
+  },
   // Дополнительные курсы будут добавлены по мере миграции данных
 ];
 

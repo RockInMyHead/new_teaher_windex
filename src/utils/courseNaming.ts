@@ -27,7 +27,9 @@ const subjectNames: Record<string, string> = {
   'music': 'Музыка',
   'art': 'Изобразительное искусство',
   'physical_education': 'Физическая культура',
-  'technology': 'Технология'
+  'technology': 'Технология',
+  'arabic': 'Арабский язык',
+  'chinese': 'Китайский язык'
 };
 
 /**
