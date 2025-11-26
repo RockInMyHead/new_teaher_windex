@@ -1175,7 +1175,7 @@ ${context}
               { role: 'system', content: systemPrompt },
               { role: 'user', content: `Ученик только что сказал: "${text}". Продолжи урок.` }
               ],
-              model: 'gpt-3.5-turbo',
+              model: 'gpt-5.1',
               temperature: 0.7,
               max_completion_tokens: 300
             }),

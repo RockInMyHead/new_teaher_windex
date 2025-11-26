@@ -268,7 +268,7 @@ ${conversationText}
       // Получить оценку от LLM
       const evaluationResponse = await api.post('/chat/completions', {
         messages: [{ role: 'system', content: evaluationPrompt }],
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-5.1',
         max_completion_tokens: 500,
         temperature: 0.3
       });

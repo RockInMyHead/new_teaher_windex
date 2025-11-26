@@ -38,7 +38,7 @@ export async function sendChatCompletion(
   options: ChatCompletionOptions = {}
 ): Promise<string> {
   const {
-    model = 'gpt-3.5-turbo',
+    model = 'gpt-5.1',
     temperature = 0.7,
     max_completion_tokens = 2000
   } = options;
@@ -107,7 +107,7 @@ export async function generateLessonPlan(
 
   const content = await sendChatCompletion(
     [{ role: 'user', content: prompt }],
-    { model: 'gpt-3.5-turbo', temperature: 0.7, max_completion_tokens: 2000 }
+    { model: 'gpt-5.1', temperature: 0.7, max_completion_tokens: 2000 }
   );
 
   // Parse JSON from response
@@ -154,7 +154,7 @@ ${lessonContext.currentSection ? `Текущий раздел урока: ${less
   messages.push({ role: 'user', content: studentInput });
 
   return sendChatCompletion(messages, {
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-5.1',
     temperature: 0.7,
     max_completion_tokens: 800
   });
@@ -179,7 +179,7 @@ export async function processTextMessage(
   ];
 
   return sendChatCompletion(messages, {
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-5.1',
     temperature: 0.7,
     max_completion_tokens: 500
   });

@@ -216,10 +216,18 @@ export class OpenAITTS {
           return;
         }
         
+        // Check for interruption more frequently during playback
+        if (this.shouldStop) {
+          console.log('🛑 TTS interrupted during playback');
+          this.pauseVideo();
+          resolve();
+          return;
+        }
+
         while (nextToPlay < totalSentences && !readyAudios[nextToPlay]) {
           nextToPlay++;
         }
-        
+
         if (nextToPlay >= totalSentences) {
           console.log('✅ TTS Streaming: All sentences played');
           this.pauseVideo();
@@ -231,8 +239,16 @@ export class OpenAITTS {
         
         const audioItem = readyAudios[nextToPlay];
         if (audioItem) {
+          // Final interruption check before playing each sentence
+          if (this.shouldStop) {
+            console.log('🛑 TTS interrupted before playing sentence');
+            this.pauseVideo();
+            resolve();
+            return;
+          }
+
           console.log(`▶️ Playing sentence ${nextToPlay + 1}/${totalSentences}: "${audioItem.text.substring(0, 30)}..."`);
-          
+
           try {
             await this.playAudioBuffer(audioItem.buffer);
             nextToPlay++;

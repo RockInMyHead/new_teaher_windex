@@ -179,14 +179,12 @@ export class ChatService {
     maxTokens: number = 10000,
     temperature: number = 0.4 // СНИЖЕНА для лучшего качества текста
   ): ChatCompletionRequest {
+    // GPT-5.1 НЕ поддерживает: top_p, presence_penalty, frequency_penalty
     return {
       model,
       messages,
       max_completion_tokens: maxTokens,
       temperature,
-      top_p: 0.9, // ДОБАВЛЕНО для более coherent ответов
-      presence_penalty: 0.1, // ДОБАВЛЕНО для разнообразия
-      frequency_penalty: 0.1, // ДОБАВЛЕНО для избежания повторений
     };
   }
 
@@ -198,14 +196,12 @@ export class ChatService {
     model: string = 'gpt-5.1',
     maxTokens: number = 10000
   ): ChatCompletionRequest {
+    // GPT-5.1 НЕ поддерживает: top_p, presence_penalty, frequency_penalty
     return {
       model,
       messages,
       max_completion_tokens: maxTokens,
       temperature: 0.3, // ЕЩЕ НИЖЕ для образовательного контента
-      top_p: 0.8, // Более focused ответы
-      presence_penalty: 0.2, // Больше разнообразия
-      frequency_penalty: 0.2, // Меньше повторений
     };
   }
 

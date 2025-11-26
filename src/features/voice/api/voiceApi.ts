@@ -37,7 +37,7 @@ export async function generateVoiceLessonNotes(
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
     ],
-    { model: 'gpt-3.5-turbo', temperature: 0.7, max_completion_tokens: 1000 }
+    { model: 'gpt-5.1', temperature: 0.7, max_completion_tokens: 1000 }
   );
 
   // Parse the response into an array of notes
@@ -100,7 +100,7 @@ ${lessonContext.progress ? `Прогресс урока: ${lessonContext.progres
   messages.push({ role: 'user', content: studentInput });
 
   return sendChatCompletion(messages, {
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-5.1',
     temperature: 0.7,
     max_completion_tokens: 500
   });
@@ -137,7 +137,7 @@ ${conversationText}
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
     ],
-    { model: 'gpt-3.5-turbo', temperature: 0.7, max_completion_tokens: 300 }
+    { model: 'gpt-5.1', temperature: 0.7, max_completion_tokens: 300 }
   );
 }
 
@@ -185,7 +185,7 @@ ${contextInfo}`;
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
     ],
-    { model: 'gpt-3.5-turbo', temperature: 0.3, max_completion_tokens: 200 }
+    { model: 'gpt-5.1', temperature: 0.3, max_completion_tokens: 200 }
   );
 
   try {

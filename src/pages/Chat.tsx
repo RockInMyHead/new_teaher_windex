@@ -356,7 +356,7 @@ const Chat = () => {
       if (lastMessage.role === 'assistant' && !lastMessage.ttsPlayed && !OpenAITTS.isPlayingAudio()) {
         // Mark as played to avoid re-playing
         lastMessage.ttsPlayed = true;
-        OpenAITTS.speak(lastMessage.content, { voice: 'nova', speed: 1.0 }); // Use OpenAI TTS
+        OpenAITTS.speakStreaming(lastMessage.content, { voice: 'nova', speed: 1.2 }); // Use optimized streaming TTS
       }
     }
   }, [messages, isTtsEnabled]);
@@ -1313,7 +1313,7 @@ ${llmContext?.learningProfile?.currentHomework ? `
       // TTS for next section
       if (isTTSAvailable() && isTtsEnabled) {
         try {
-          await OpenAITTS.speak(sectionContent, {});
+          await OpenAITTS.speakStreaming(sectionContent, { voice: 'nova', speed: 1.2 });
         } catch (ttsError) {
           console.error('TTS error:', ttsError);
         }

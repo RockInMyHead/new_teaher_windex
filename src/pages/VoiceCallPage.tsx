@@ -85,12 +85,19 @@ const VoiceCallPage: React.FC = () => {
   // Prevent duplicate LLM requests
   const isProcessingLLMRef = useRef<boolean>(false);
 
+  // Message queue for sequential processing of user inputs
+  const messageQueueRef = useRef<string[]>([]);
+  const isProcessingQueueRef = useRef<boolean>(false);
+
   // Media recording refs
   const mediaRecorderRef = useRef<any>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   
   // TTS Audio ref for cleanup
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // TTS interruption handling
+  const isTTSInterruptedRef = useRef<boolean>(false);
   
   // Profile creation tracking
   const profileCreationAttemptedRef = useRef<boolean>(false);
@@ -181,6 +188,9 @@ const VoiceCallPage: React.FC = () => {
   // Stop TTS function (called when user starts speaking)
   const stopTTS = () => {
     console.log('🔇 Interrupting TTS due to user speech...');
+
+    // Set interruption flag for ongoing TTS
+    isTTSInterruptedRef.current = true;
 
     // Stop OpenAI TTS streaming
     OpenAITTS.stop();
@@ -379,7 +389,14 @@ const VoiceCallPage: React.FC = () => {
 
       recognition.onstart = () => {
         console.log('🎙️ Web Speech Recognition started');
-        // TTS will be stopped automatically when new speech starts
+
+        // 🚨 CRITICAL: Stop any active TTS when user starts speaking
+        // This prevents voice overlap and creates natural conversation flow
+        if (isSpeaking) {
+          console.log('🔇 Interrupting TTS - user started speaking');
+          stopTTS();
+          setIsSpeaking(false);
+        }
       };
 
       recognition.onresult = async (event) => {
@@ -393,9 +410,9 @@ const VoiceCallPage: React.FC = () => {
             finalTranscript += transcript;
             console.log('🎤 Final result:', transcript);
 
-            // Process the final transcript
+            // Add to message queue for sequential processing
             if (transcript.trim().length > 0) {
-              await handleSpeechTranscript(transcript.trim());
+              addToMessageQueue(transcript.trim());
             }
           } else {
             interimTranscript += transcript;
@@ -711,12 +728,16 @@ const VoiceCallPage: React.FC = () => {
       await speakText(textForTTS);
       setIsSpeaking(false);
 
-      // Resume listening after TTS with delay to prevent audio conflicts
+      // Reset interruption flag after completion
+      isTTSInterruptedRef.current = false;
+
+      // Resume listening after TTS - immediately if interrupted, with delay if completed normally
+      const resumeDelay = isTTSInterruptedRef.current ? 100 : 500;
       setTimeout(() => {
         if (isActiveRef.current) {
           startListening();
         }
-      }, 500);
+      }, resumeDelay);
       
     } catch (error) {
       console.error('❌ Handle speech transcript error:', error);
@@ -776,6 +797,33 @@ const VoiceCallPage: React.FC = () => {
     }
   };
 
+  // Message queue management
+  const addToMessageQueue = (transcript: string) => {
+    messageQueueRef.current.push(transcript);
+    if (!isProcessingQueueRef.current) {
+      processNextMessage();
+    }
+  };
+
+  const processNextMessage = async () => {
+    if (isProcessingQueueRef.current || messageQueueRef.current.length === 0) {
+      return;
+    }
+
+    isProcessingQueueRef.current = true;
+    const transcript = messageQueueRef.current.shift()!;
+
+    try {
+      await handleSpeechTranscript(transcript);
+    } finally {
+      isProcessingQueueRef.current = false;
+      // Process next message if any
+      if (messageQueueRef.current.length > 0) {
+        setTimeout(() => processNextMessage(), 100); // Small delay between messages
+      }
+    }
+  };
+
   // Handle silence
   const handleSilence = async () => {
     try {
@@ -783,7 +831,7 @@ const VoiceCallPage: React.FC = () => {
       setIsProcessing(true);
 
       const message = "Есть вопросы? Я готова помочь!";
-      
+
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: message,
@@ -1356,9 +1404,10 @@ ${lessonContextText}
 - Хвали за успехи и мягко указывай на ошибки
 - Если видишь проблему - добавь её в список проблемных тем
 
-УЧЕНИК СКАЗАЛ: "${userMessage}"
+${userMessage ? `УЧЕНИК СКАЗАЛ: "${userMessage}"
 
-Ответь как учитель по курсу "${courseTitle}". Будь дружелюбной, но профессиональной.
+Ответь как учитель по курсу "${courseTitle}". Будь дружелюбной, но профессиональной.` : `Это начало урока. Поприветствуй ученика, представься как Юля - учитель по курсу "${courseTitle}". 
+Коротко расскажи, чем будете заниматься сегодня. Спроси, готов ли ученик начать.`}
 
 🎤 ВАЖНО ДЛЯ ГОЛОСОВОГО ОТВЕТА:
 - ВСЕ цифры, числа, даты, проценты и формулы переписывай словами
@@ -1411,6 +1460,7 @@ ${lessonContextText}
       { role: 'user', content: userMessage }
     ];
 
+    // GPT-5.1 НЕ поддерживает: top_p, presence_penalty, frequency_penalty
     const response = await fetch('/api/chat/completions', {
         method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1418,8 +1468,7 @@ ${lessonContextText}
         messages: messagesForAPI,
         model: 'gpt-5.1',
         max_completion_tokens: 800,
-        temperature: 0.6,
-        top_p: 0.9
+        temperature: 0.6
         })
       });
 
@@ -1449,17 +1498,46 @@ ${lessonContextText}
   // Speak text with parallel sentence generation and sequential playback
   const speakText = async (text: string): Promise<void> => {
     try {
+      // Reset interruption flag at start
+      isTTSInterruptedRef.current = false;
+
       console.log('🔊 Speaking with streaming TTS:', text.substring(0, 30) + '...');
-      
-      // Используем новый метод speakStreaming для параллельной генерации
-      // и последовательного воспроизведения предложений
-      await OpenAITTS.speakStreaming(text, {
+
+      // Create interruptible TTS promise
+      const ttsPromise = OpenAITTS.speakStreaming(text, {
         voice: 'nova',
           model: 'tts-1',
         speed: 1.0
       });
-      
-      console.log('✅ TTS streaming complete');
+
+      // Add interruption checking during TTS
+      const interruptiblePromise = new Promise<void>((resolve, reject) => {
+        const checkInterruption = () => {
+          if (isTTSInterruptedRef.current) {
+            console.log('🎯 TTS interrupted by user speech');
+            OpenAITTS.stop();
+            resolve(); // Resolve early due to interruption
+            return;
+          }
+
+          // Continue checking every 100ms
+          setTimeout(checkInterruption, 100);
+        };
+
+        // Start interruption checking
+        checkInterruption();
+
+        // Wait for TTS completion
+        ttsPromise.then(resolve).catch(reject);
+      });
+
+      await interruptiblePromise;
+
+      // Only log completion if not interrupted
+      if (!isTTSInterruptedRef.current) {
+        console.log('✅ TTS streaming complete');
+      }
+
       setAudioBlocked(false);
 
     } catch (error) {
