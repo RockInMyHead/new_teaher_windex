@@ -97,6 +97,9 @@ const VoiceCallPage: React.FC = () => {
   
   // Initialization tracking
   const initializationStartedRef = useRef<boolean>(false);
+  
+  // Welcome message tracking - prevent duplicate sends
+  const welcomeMessageSentRef = useRef<boolean>(false);
 
   // Audio detection constants
   const MIN_THRESHOLD = 5;
@@ -733,6 +736,13 @@ const VoiceCallPage: React.FC = () => {
 
   // Send welcome message when entering chat
   const sendWelcomeMessage = async () => {
+    // Prevent duplicate welcome messages
+    if (welcomeMessageSentRef.current) {
+      console.log('⚠️ Welcome message already sent, skipping duplicate');
+      return;
+    }
+    welcomeMessageSentRef.current = true;
+    
     try {
       console.log('👋 Sending welcome message...');
       setIsProcessing(true);
@@ -1641,7 +1651,7 @@ ${lessonContextText}
         }
       }
 
-      if (messages.length === 0) {
+      if (messages.length === 0 && !welcomeMessageSentRef.current) {
         console.log('💬 Chat is empty, sending welcome message...');
         await sendWelcomeMessage();
       }
@@ -1656,6 +1666,7 @@ ${lessonContextText}
       cleanup();
       initializationStartedRef.current = false; // Reset for next mount
       profileCreationAttemptedRef.current = false; // Reset for next mount
+      welcomeMessageSentRef.current = false; // Reset for next mount
     };
   }, []);
 

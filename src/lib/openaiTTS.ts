@@ -115,12 +115,24 @@ export class OpenAITTS {
     return this.speakText(text, options);
   }
 
+  // Флаг для предотвращения параллельного запуска TTS
+  private static isSpeakingInProgress = false;
+  
   /**
    * 🚀 НОВЫЙ МЕТОД: Параллельная генерация TTS с последовательным воспроизведением
    * Разбивает текст на предложения, генерирует аудио параллельно,
    * и воспроизводит по мере готовности
    */
   static async speakStreaming(text: string, options: TTSOptions = {}): Promise<void> {
+    // Предотвращаем параллельный запуск TTS
+    if (this.isSpeakingInProgress) {
+      console.warn('⚠️ TTS already in progress, stopping previous and starting new');
+      this.stop();
+      // Ждём завершения остановки
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    this.isSpeakingInProgress = true;
     console.log('🚀 TTS Streaming: Starting parallel generation...');
     
     // Инициализируем отслеживание взаимодействия
@@ -129,12 +141,14 @@ export class OpenAITTS {
     // Проверяем доступность TTS
     if (!isTTSAvailable()) {
       console.error('❌ TTS not available');
+      this.isSpeakingInProgress = false;
       return this.fallbackToBrowserTTS(text, () => {});
     }
     
     // Проверяем user activation
     if (!this.hasUserActivation()) {
       console.warn('⚠️ No user activation for TTS');
+      this.isSpeakingInProgress = false;
       this.showAutoplayWarning();
       return;
     }
@@ -197,6 +211,7 @@ export class OpenAITTS {
         if (this.shouldStop) {
           console.log('🛑 TTS Streaming: Stopped by user');
           this.pauseVideo();
+          this.isSpeakingInProgress = false; // Reset flag when stopped
           resolve();
           return;
         }
@@ -209,6 +224,7 @@ export class OpenAITTS {
           console.log('✅ TTS Streaming: All sentences played');
           this.pauseVideo();
           this.isPlaying = false;
+          this.isSpeakingInProgress = false; // Reset flag when done
           resolve();
           return;
         }
@@ -648,9 +664,11 @@ export class OpenAITTS {
   }
 
   static stop(): void {
+    console.log('🛑 TTS stopped');
     // Останавливаем флаг для streaming
     this.shouldStop = true;
     this.isPlaying = false;
+    this.isSpeakingInProgress = false; // Reset speaking flag
     this.audioQueue = [];
     
     // Останавливаем текущий AudioBufferSourceNode
