@@ -7,12 +7,26 @@ export interface TTSOptions {
   format?: 'aac' | 'mp3' | 'opus' | 'flac';
 }
 
+// Интерфейс для элемента очереди воспроизведения
+interface AudioQueueItem {
+  buffer: AudioBuffer;
+  index: number;
+  text: string;
+}
+
 export class OpenAITTS {
   private static audioContext: AudioContext | null = null;
   private static currentAudio: HTMLAudioElement | null = null;
   private static videoElement: HTMLVideoElement | null = null;
   private static currentAudioUrl: string | null = null;
   private static interactionListenersAttached = false;
+  
+  // Новые свойства для параллельной генерации
+  private static audioQueue: AudioQueueItem[] = [];
+  private static isPlaying = false;
+  private static currentSource: AudioBufferSourceNode | null = null;
+  private static shouldStop = false;
+  private static onPlaybackComplete: (() => void) | null = null;
 
   // Инициализация отслеживания пользовательского взаимодействия
   private static initInteractionTracking(): void {
@@ -110,6 +124,258 @@ export class OpenAITTS {
 
   static async speak(text: string, options: TTSOptions = {}): Promise<void> {
     return this.speakText(text, options);
+  }
+
+  /**
+   * 🚀 НОВЫЙ МЕТОД: Параллельная генерация TTS с последовательным воспроизведением
+   * Разбивает текст на предложения, генерирует аудио параллельно,
+   * и воспроизводит по мере готовности
+   */
+  static async speakStreaming(text: string, options: TTSOptions = {}): Promise<void> {
+    console.log('🚀 TTS Streaming: Starting parallel generation...');
+    
+    // Инициализируем отслеживание взаимодействия
+    this.initInteractionTracking();
+    
+    // Проверяем доступность TTS
+    if (!isTTSAvailable()) {
+      console.error('❌ TTS not available');
+      return this.fallbackToBrowserTTS(text, () => {});
+    }
+    
+    // Проверяем user activation
+    if (!this.hasUserActivation()) {
+      console.warn('⚠️ No user activation for TTS');
+      this.showAutoplayWarning();
+      return;
+    }
+    
+    // Останавливаем текущее воспроизведение
+    this.stop();
+    this.shouldStop = false;
+    this.audioQueue = [];
+    
+    // Разбиваем текст на предложения
+    const sentences = this.splitIntoSentences(text);
+    console.log(`📝 TTS Streaming: Split into ${sentences.length} sentences`);
+    
+    if (sentences.length === 0) {
+      console.warn('⚠️ No sentences to speak');
+      return;
+    }
+    
+    // Если только одно предложение - используем обычный метод
+    if (sentences.length === 1) {
+      return this.speakText(text, options);
+    }
+    
+    // Инициализируем AudioContext
+    await this.initAudioContext();
+    
+    return new Promise<void>(async (resolve) => {
+      this.onPlaybackComplete = resolve;
+      
+      // Запускаем параллельную генерацию всех предложений
+      const generationPromises = sentences.map((sentence, index) => 
+        this.generateSentenceAudio(sentence, index, options)
+      );
+      
+      // Обрабатываем результаты по мере готовности
+      let nextToPlay = 0;
+      let completedCount = 0;
+      const totalSentences = sentences.length;
+      
+      // Используем Promise.allSettled для обработки всех результатов
+      const results = await Promise.allSettled(generationPromises);
+      
+      // Сортируем готовые аудио по индексу
+      const readyAudios: (AudioQueueItem | null)[] = new Array(totalSentences).fill(null);
+      
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.status === 'fulfilled' && result.value) {
+          readyAudios[result.value.index] = result.value;
+        } else {
+          console.warn(`⚠️ Sentence ${i} generation failed`);
+        }
+      }
+      
+      // Начинаем воспроизведение
+      console.log('▶️ TTS Streaming: Starting playback...');
+      this.playVideo();
+      
+      const playNext = async () => {
+        if (this.shouldStop) {
+          console.log('🛑 TTS Streaming: Stopped by user');
+          this.pauseVideo();
+          resolve();
+          return;
+        }
+        
+        while (nextToPlay < totalSentences && !readyAudios[nextToPlay]) {
+          nextToPlay++;
+        }
+        
+        if (nextToPlay >= totalSentences) {
+          console.log('✅ TTS Streaming: All sentences played');
+          this.pauseVideo();
+          this.isPlaying = false;
+          resolve();
+          return;
+        }
+        
+        const audioItem = readyAudios[nextToPlay];
+        if (audioItem) {
+          console.log(`▶️ Playing sentence ${nextToPlay + 1}/${totalSentences}: "${audioItem.text.substring(0, 30)}..."`);
+          
+          try {
+            await this.playAudioBuffer(audioItem.buffer);
+            nextToPlay++;
+            playNext();
+          } catch (error) {
+            console.error(`❌ Error playing sentence ${nextToPlay}:`, error);
+            nextToPlay++;
+            playNext();
+          }
+        } else {
+          nextToPlay++;
+          playNext();
+        }
+      };
+      
+      this.isPlaying = true;
+      playNext();
+    });
+  }
+  
+  /**
+   * Разбивает текст на предложения для TTS
+   */
+  private static splitIntoSentences(text: string): string[] {
+    // Убираем лишние пробелы и переносы строк
+    const cleanText = text.replace(/\s+/g, ' ').trim();
+    
+    // Разбиваем по знакам препинания, сохраняя их
+    const sentenceRegex = /[^.!?]+[.!?]+/g;
+    const sentences = cleanText.match(sentenceRegex) || [];
+    
+    // Фильтруем слишком короткие предложения (меньше 5 символов)
+    // и объединяем очень короткие с предыдущими
+    const result: string[] = [];
+    
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if (trimmed.length < 5) continue;
+      
+      // Если предложение очень короткое и есть предыдущее, объединяем
+      if (trimmed.length < 20 && result.length > 0) {
+        result[result.length - 1] += ' ' + trimmed;
+      } else {
+        result.push(trimmed);
+      }
+    }
+    
+    // Если остался текст без знаков препинания в конце
+    const lastMatch = cleanText.match(/[^.!?]+$/);
+    if (lastMatch && lastMatch[0].trim().length > 5) {
+      const remaining = lastMatch[0].trim();
+      if (result.length > 0 && remaining.length < 20) {
+        result[result.length - 1] += ' ' + remaining;
+      } else {
+        result.push(remaining);
+      }
+    }
+    
+    return result;
+  }
+  
+  /**
+   * Генерирует аудио для одного предложения
+   */
+  private static async generateSentenceAudio(
+    sentence: string, 
+    index: number, 
+    options: TTSOptions
+  ): Promise<AudioQueueItem | null> {
+    try {
+      console.log(`🎤 Generating audio for sentence ${index + 1}: "${sentence.substring(0, 30)}..."`);
+      
+      const startTime = Date.now();
+      const arrayBuffer = await this.generateSpeech(sentence, options);
+      const generationTime = Date.now() - startTime;
+      
+      console.log(`✅ Sentence ${index + 1} generated in ${generationTime}ms, size: ${arrayBuffer.byteLength} bytes`);
+      
+      // Декодируем в AudioBuffer
+      if (!this.audioContext) {
+        await this.initAudioContext();
+      }
+      
+      const audioBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
+        this.audioContext!.decodeAudioData(
+          arrayBuffer.slice(0),
+          (buffer) => resolve(buffer),
+          (error) => reject(error)
+        );
+      });
+      
+      return {
+        buffer: audioBuffer,
+        index,
+        text: sentence
+      };
+    } catch (error) {
+      console.error(`❌ Failed to generate sentence ${index + 1}:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Инициализирует AudioContext
+   */
+  private static async initAudioContext(): Promise<void> {
+    if (!this.audioContext) {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error('AudioContext not supported');
+      }
+      this.audioContext = new AudioContextClass();
+      console.log('✅ AudioContext initialized');
+    }
+    
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+      console.log('✅ AudioContext resumed');
+    }
+  }
+  
+  /**
+   * Воспроизводит один AudioBuffer
+   */
+  private static playAudioBuffer(buffer: AudioBuffer): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.audioContext || this.shouldStop) {
+        resolve();
+        return;
+      }
+      
+      try {
+        const source = this.audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.audioContext.destination);
+        
+        this.currentSource = source;
+        
+        source.onended = () => {
+          this.currentSource = null;
+          resolve();
+        };
+        
+        source.start(0);
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 
   // Проверка на user activation (необходима для autoplay)
@@ -365,20 +631,45 @@ export class OpenAITTS {
   }
 
   static stop(): void {
+    // Останавливаем флаг для streaming
+    this.shouldStop = true;
+    this.isPlaying = false;
+    this.audioQueue = [];
+    
+    // Останавливаем текущий AudioBufferSourceNode
+    if (this.currentSource) {
+      try {
+        this.currentSource.stop();
+      } catch (e) {
+        // Ignore if already stopped
+      }
+      this.currentSource = null;
+    }
+    
+    // Останавливаем HTML Audio
     if (this.currentAudio) {
       this.currentAudio.pause();
       this.currentAudio.currentTime = 0;
       this.currentAudio = null;
     }
+    
     if (this.currentAudioUrl) {
       URL.revokeObjectURL(this.currentAudioUrl);
       this.currentAudioUrl = null;
     }
+    
+    // Вызываем callback завершения если есть
+    if (this.onPlaybackComplete) {
+      this.onPlaybackComplete();
+      this.onPlaybackComplete = null;
+    }
+    
     this.pauseVideo();
+    console.log('🛑 TTS stopped');
   }
 
-  static isPlaying(): boolean {
-    return this.currentAudio !== null && !this.currentAudio.paused;
+  static isPlayingAudio(): boolean {
+    return this.isPlaying || (this.currentAudio !== null && !this.currentAudio.paused) || this.currentSource !== null;
   }
 
   // Set video element to sync with TTS

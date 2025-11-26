@@ -8,6 +8,7 @@ import { useLearningProfile } from '@/hooks/useLearningProfile';
 import { sessionService } from '@/services/sessionService';
 import { learningProfileService } from '@/services/learningProfileService';
 import { parseCourseId, getFullCourseTitle, getCourseById } from '@/config/courses';
+import { OpenAITTS } from '@/lib/openaiTTS';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -175,7 +176,10 @@ const VoiceCallPage: React.FC = () => {
   const stopTTS = () => {
     console.log('🔇 Interrupting TTS due to user speech...');
 
-    // Stop HTML Audio TTS
+    // Stop OpenAI TTS streaming
+    OpenAITTS.stop();
+
+    // Stop HTML Audio TTS (legacy fallback)
     if (currentAudioRef.current) {
       console.log('🔇 Stopping TTS audio...');
       currentAudioRef.current.pause();
@@ -193,7 +197,10 @@ const VoiceCallPage: React.FC = () => {
   const cleanup = () => {
     console.log('🧹 Cleanup started');
     
-    // Stop TTS Audio
+    // Stop OpenAI TTS streaming
+    OpenAITTS.stop();
+    
+    // Stop TTS Audio (legacy fallback)
     if (currentAudioRef.current) {
       console.log('🔇 Stopping TTS audio...');
       currentAudioRef.current.pause();
@@ -1336,118 +1343,45 @@ ${lessonContextText}
     }
   };
 
-  // Speak text
+  // Speak text with parallel sentence generation and sequential playback
   const speakText = async (text: string): Promise<void> => {
     try {
-      console.log('🔊 Speaking:', text.substring(0, 30) + '...');
-
-      const response = await fetch('/api/audio/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'tts-1',
-          input: text,
-          voice: 'nova'
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('TTS failed');
-      }
-
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-
-      return new Promise((resolve, reject) => {
-      const audio = new Audio(audioUrl);
+      console.log('🔊 Speaking with streaming TTS:', text.substring(0, 30) + '...');
       
-      // Store audio ref for cleanup
-      currentAudioRef.current = audio;
-
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-        currentAudioRef.current = null; // Clear ref when done
-          console.log('✅ TTS complete');
-          resolve();
-      };
-
-      audio.onerror = (error) => {
-          console.error('❌ TTS playback error:', error);
-        URL.revokeObjectURL(audioUrl);
-        currentAudioRef.current = null; // Clear ref on error
-          reject(error);
-      };
-
-        // Try to play audio
-        const playPromise = audio.play();
-
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              console.log('🎵 TTS audio playing successfully');
-              setAudioBlocked(false); // Audio works fine
-            })
-            .catch((playError) => {
-              URL.revokeObjectURL(audioUrl);
-
-          // Handle autoplay restrictions
-          if (playError.name === 'NotAllowedError') {
-                console.warn('⚠️ Autoplay blocked by browser. Switching to browser TTS...');
-                setAudioBlocked(true); // Show indicator that audio is blocked
-
-                // Fallback to browser TTS immediately
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'ru-RU';
-                utterance.rate = 0.9; // Slightly slower for clarity
-                utterance.pitch = 1.0;
-
-                utterance.onend = () => {
-                  console.log('✅ Browser TTS complete (fallback)');
-                  resolve();
-                };
-
-                utterance.onerror = (error) => {
-                  console.error('❌ Browser TTS error:', error);
-                  resolve(); // Continue even if TTS fails
-                };
-
-                // Check if speech synthesis is available
-                if ('speechSynthesis' in window) {
-                  window.speechSynthesis.speak(utterance);
-          } else {
-                  console.warn('⚠️ Speech synthesis not available');
-                  resolve();
-                }
-              } else {
-                console.error('❌ Unexpected play error:', playError);
-            reject(playError);
-          }
-        });
-        }
+      // Используем новый метод speakStreaming для параллельной генерации
+      // и последовательного воспроизведения предложений
+      await OpenAITTS.speakStreaming(text, {
+        voice: 'nova',
+        model: 'tts-1',
+        speed: 1.0
       });
-
+      
+      console.log('✅ TTS streaming complete');
+      setAudioBlocked(false);
+      
     } catch (error) {
-      console.error('❌ TTS error, using fallback:', error);
+      console.error('❌ TTS streaming error, using fallback:', error);
+      setAudioBlocked(true);
 
       // Fallback to browser TTS
       return new Promise((resolve) => {
         if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'ru-RU';
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'ru-RU';
           utterance.rate = 0.9;
           utterance.pitch = 1.0;
 
-        utterance.onend = () => {
-          console.log('✅ Browser TTS complete');
-          resolve();
-        };
+          utterance.onend = () => {
+            console.log('✅ Browser TTS complete');
+            resolve();
+          };
 
           utterance.onerror = (error) => {
             console.error('❌ Browser TTS error:', error);
             resolve();
           };
 
-        window.speechSynthesis.speak(utterance);
+          window.speechSynthesis.speak(utterance);
         } else {
           console.warn('⚠️ Speech synthesis not available');
           resolve();
