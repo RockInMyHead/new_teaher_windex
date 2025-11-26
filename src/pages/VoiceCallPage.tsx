@@ -393,7 +393,7 @@ const VoiceCallPage: React.FC = () => {
             }
           } else {
             interimTranscript += transcript;
-            console.log('🎤 Interim result:', transcript);
+            // Removed frequent interim result logging for performance
           }
         }
       };
@@ -561,7 +561,7 @@ const VoiceCallPage: React.FC = () => {
 
       // Mark that speech was detected
       if (speechFramesRef.current >= REQUIRED_SPEECH_FRAMES && !speechDetectedRef.current) {
-        console.log(`🎤 SPEECH STARTED! avg=${average.toFixed(1)}, max=${max}, threshold=${dynamicThreshold.toFixed(1)}, silence_threshold=${silenceThreshold.toFixed(1)}`);
+        // Removed detailed speech analysis logging for performance
         speechDetectedRef.current = true;
       }
       
@@ -638,12 +638,11 @@ const VoiceCallPage: React.FC = () => {
     }
 
     try {
-      console.log('🔊 Processing speech transcript:', transcript);
+      console.log('🔊 Processing speech transcript...');
       setIsProcessing(true);
 
       // Use transcript directly from Web Speech API
       const transcription = transcript;
-      console.log('📝 Transcription from Web Speech API:', transcription);
 
       if (!transcription || transcription.trim().length < 2) {
         console.warn('⚠️ Transcription too short');
@@ -670,9 +669,14 @@ const VoiceCallPage: React.FC = () => {
 
       // Get LLM response
       console.log('📤 Getting LLM response for transcription:', transcription.substring(0, 100) + '...');
-      const response = await getLLMResponse(transcription);
+      let response = await getLLMResponse(transcription);
       console.log('🤖 LLM response received, length:', response ? response.length : 0);
-      console.log('🤖 LLM response preview:', response ? response.substring(0, 200) + '...' : 'EMPTY');
+      
+      // Handle empty or too short responses with fallback
+      if (!response || response.trim().length < 10) {
+        console.warn('⚠️ Empty LLM response, using fallback message');
+        response = `Хорошо, ты сказал: "${transcription}". Давай разберём это подробнее. Что именно тебе непонятно?`;
+      }
       
       // Extract theses from response
       const theses = extractTheses(response);
@@ -1387,8 +1391,9 @@ ${lessonContextText}
         body: JSON.stringify({
         messages: messagesForAPI,
         model: 'gpt-5.1',
-        max_completion_tokens: 200,
-        temperature: 0.7
+        max_completion_tokens: 800,
+        temperature: 0.6,
+        top_p: 0.9
         })
       });
 
@@ -1399,7 +1404,14 @@ ${lessonContextText}
     }
 
       const result = await response.json();
-    return result.choices[0].message.content;
+      console.log('📥 LLM API response:', JSON.stringify(result).substring(0, 300));
+      
+      // Extract content safely
+      const content = result?.choices?.[0]?.message?.content || '';
+      if (!content) {
+        console.warn('⚠️ LLM returned empty content, result:', result);
+      }
+      return content;
     } catch (error) {
       console.error('❌ Error in getLLMResponse:', error);
       console.error('❌ Error message:', error.message);
