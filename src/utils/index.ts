@@ -29,14 +29,6 @@ export {
 } from './lessonContextManager';
 
 // Course Plans
-export {
-  COURSE_PLANS,
-  getCoursePlan,
-  getLessonFromPlan,
-  getAvailableGrades,
-  type CoursePlan,
-  type LessonPlan
-} from './coursePlans';
 
 // Other existing utilities can be exported here as needed
 

@@ -74,6 +74,13 @@ class LearningProgressService {
   }
 
   /**
+   * Создать или получить запись о курсе пользователя
+   */
+  async ensureUserCourse(userId: string, courseId: string): Promise<{ userCourse: UserCourseProgress }> {
+    return api.post('/learning-progress/users/courses/enroll', { userId, courseId });
+  }
+
+  /**
    * Получить прогресс пользователя по курсу
    */
   async getUserCourseProgress(
@@ -88,7 +95,8 @@ class LearningProgressService {
    */
   async startLesson(data: {
     userId: string;
-    lessonId: string;
+    courseId: string;
+    lessonNumber: number;
     userCourseId: string;
   }): Promise<{ lessonProgress: LessonProgress }> {
     return api.post('/learning-progress/lessons/start', data);
@@ -203,33 +211,30 @@ class LearningProgressService {
     return api.get(`/learning-progress/users/${userId}/stats`);
   }
 
+  // Lesson context is now stored in memory for quick access
+  private lessonContext: CourseContext | null = null;
+
   /**
-   * Сохранить контекст урока в localStorage (для быстрого доступа)
+   * Сохранить контекст урока в памяти
    */
   saveLessonContext(context: CourseContext): void {
-    localStorage.setItem('currentLessonContext', JSON.stringify(context));
+    this.lessonContext = context;
+    console.log('📚 Lesson context saved to memory:', context.courseTitle);
   }
 
   /**
-   * Получить контекст урока из localStorage
+   * Получить контекст урока из памяти
    */
   getLessonContext(): CourseContext | null {
-    const data = localStorage.getItem('currentLessonContext');
-    if (!data) return null;
-
-    try {
-      return JSON.parse(data);
-    } catch (error) {
-      console.error('Error parsing lesson context:', error);
-      return null;
-    }
+    return this.lessonContext;
   }
 
   /**
    * Очистить контекст урока
    */
   clearLessonContext(): void {
-    localStorage.removeItem('currentLessonContext');
+    this.lessonContext = null;
+    console.log('🗑️ Lesson context cleared');
   }
 }
 

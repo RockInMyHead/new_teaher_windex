@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { sessionService } from '@/services/sessionService';
 
 interface PersonalizedCourse {
   id: string;
@@ -242,7 +243,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
       try {
-      setUser(JSON.parse(savedUser));
+        const parsedUser = JSON.parse(savedUser);
+        
+        // ВАЖНО: Устанавливаем userId в sessionService
+        sessionService.setUserId(parsedUser.id);
+        console.log('🔐 Restored session for user:', parsedUser.id);
+        
+        // Миграция: конвертируем старые ID курсов с кириллицей в латиницу
+        if (parsedUser.activeCourses && parsedUser.activeCourses.length > 0) {
+          const courseIdMapping: { [key: string]: string } = {
+            'русский': 'russian',
+            'английский': 'english',
+            'арабский': 'arabic',
+            'китайский': 'chinese',
+            'математика': 'math',
+            'физика': 'physics',
+            'география': 'geography',
+            'история': 'history',
+            'обществознание': 'social'
+          };
+          
+          let needsUpdate = false;
+          parsedUser.activeCourses = parsedUser.activeCourses.map((course: ActiveCourse) => {
+            const courseIdParts = course.id.split('-');
+            if (courseIdParts.length === 2) {
+              const baseId = courseIdParts[0].toLowerCase();
+              const grade = courseIdParts[1];
+              
+              // Проверяем, содержит ли baseId кириллицу
+              if (/[а-яё]/i.test(baseId)) {
+                const englishId = courseIdMapping[baseId];
+                if (englishId) {
+                  needsUpdate = true;
+                  console.log(`🔄 Migrating course ID: ${course.id} → ${englishId}-${grade}`);
+                  return { ...course, id: `${englishId}-${grade}` };
+                }
+              }
+            }
+            return course;
+          });
+          
+          if (needsUpdate) {
+            console.log('💾 Saving migrated user data to localStorage');
+            localStorage.setItem('user', JSON.stringify(parsedUser));
+          }
+        }
+        
+        setUser(parsedUser);
       } catch (error) {
         console.error('Error parsing saved user from localStorage:', error);
         localStorage.removeItem('user');
@@ -574,6 +621,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           parsedUser.stats = getInitialStats();
         }
         setUser(parsedUser);
+        // ВАЖНО: Устанавливаем userId в sessionService
+        sessionService.setUserId(parsedUser.id);
+        console.log('🔐 Login: userId set to:', parsedUser.id);
         setIsLoading(false);
         // Check achievements on login to unlock initial achievements
         setTimeout(() => {
@@ -597,6 +647,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           familyMembers: []
         };
         setUser(mockUser);
+        // ВАЖНО: Устанавливаем userId в sessionService для нового пользователя
+        sessionService.setUserId(mockUser.id);
+        console.log('🔐 Login (new user): userId set to:', mockUser.id);
         setIsLoading(false);
         localStorage.setItem('user', JSON.stringify(mockUser));
       }
@@ -627,6 +680,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           familyMembers: []
         };
       setUser(mockUser);
+      // ВАЖНО: Устанавливаем userId в sessionService для нового пользователя
+      sessionService.setUserId(mockUser.id);
+      console.log('🔐 Register: userId set to:', mockUser.id);
       setIsLoading(false);
       localStorage.setItem('user', JSON.stringify(mockUser));
       // Check achievements for new user
@@ -920,7 +976,7 @@ ${lessonContext}
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: 'gpt-5.1',
           messages: [
             {
               role: 'system',

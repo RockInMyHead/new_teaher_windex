@@ -6,7 +6,6 @@
 
 // API
 export * from './api/chatApi';
-export * from './api/lessonApi';
 
 // Model
 export * from './model/chatModel';

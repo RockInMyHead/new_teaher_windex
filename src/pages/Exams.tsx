@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +19,7 @@ interface ExamCourse {
 
 const Exams: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [examCourses, setExamCourses] = useState<ExamCourse[]>([]);
   const [selectedExamType, setSelectedExamType] = useState<'ЕГЭ' | 'ОГЭ' | null>(null);
 
@@ -30,20 +31,16 @@ const Exams: React.FC = () => {
         setExamCourses(response.examCourses || []);
       } catch (error) {
         console.error('Failed to load exam courses:', error);
-        // Fallback to localStorage for backward compatibility
-        const storedCourses = localStorage.getItem('examCourses');
-        if (storedCourses) {
-          try {
-            setExamCourses(JSON.parse(storedCourses));
-          } catch (parseError) {
-            console.error('Failed to parse exam courses:', parseError);
-          }
-        }
+        // No fallback - exam courses are only stored in DB
+        setExamCourses([]);
       }
     };
 
-    loadExamCourses();
-  }, []);
+    // Load courses when component mounts or when returning to /exams page
+    if (location.pathname === '/exams') {
+      loadExamCourses();
+    }
+  }, [location.pathname]);
 
   const handleSelectExamType = (type: 'ЕГЭ' | 'ОГЭ') => {
     setSelectedExamType(type);
@@ -63,10 +60,9 @@ const Exams: React.FC = () => {
       setExamCourses(response.examCourses || []);
     } catch (error) {
       console.error('Failed to delete exam course:', error);
-      // Fallback to localStorage update
+      // Update local state even if API fails
       const updatedCourses = examCourses.filter(course => course.id !== courseId);
       setExamCourses(updatedCourses);
-      localStorage.setItem('examCourses', JSON.stringify(updatedCourses));
     }
   };
 

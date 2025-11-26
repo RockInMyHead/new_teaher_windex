@@ -10,23 +10,19 @@ import Auth from "./pages/Auth";
 import CoursesPage from "./pages/CoursesPage";
 import AvailableCourses from "./pages/AvailableCourses";
 import Chat from "./pages/Chat";
-import Lesson from "./pages/Lesson";
-import LessonDetail from "./pages/LessonDetail";
 import CourseDetail from "./pages/CourseDetail";
 import VoiceCallPage from "./pages/VoiceCallPage";
-import VideoCall from "./pages/VideoCall";
 import Achievements from "./pages/Achievements";
-import AssessmentLevel from "./pages/AssessmentLevel";
 import PersonalAccount from "./pages/PersonalAccount";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import NotFound from "./pages/NotFound";
-import StreamingChatTest from "./examples/StreamingChatTest";
-import GradeSelection from "./pages/GradeSelection";
 import Exams from "./pages/Exams";
 import ExamAddCourse from "./pages/ExamAddCourse";
+import Library from "./pages/Library";
+import CourseAssessment from "./pages/CourseAssessment";
 
-// Component to handle TTS cleanup on navigation
+// Component to handle TTS cleanup and localStorage cleanup on navigation
 const TTSNavigationHandler = () => {
   const location = useLocation();
 
@@ -39,7 +35,13 @@ const TTSNavigationHandler = () => {
 
 const queryClient = new QueryClient();
 
-const App = () => (
+const App = () => {
+  // App initialization - data cleanup now handled by sessionService and DB
+  useEffect(() => {
+    console.log('🚀 App initialized');
+  }, []);
+
+  return (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <TooltipProvider>
@@ -56,25 +58,21 @@ const App = () => (
                 <Route path="/" element={<Index />} />
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/courses" element={<CoursesPage />} />
-                <Route path="/grade-selection" element={<GradeSelection />} />
                 <Route path="/available-courses" element={<AvailableCourses />} />
-                <Route path="/lesson" element={<Lesson />} />
-                <Route path="/lesson/:lessonId" element={<LessonDetail />} />
                 <Route path="/course/:courseId/select-mode" element={<CourseDetail />} />
                 <Route path="/course/:courseId/:mode" element={<CourseDetail />} />
                 <Route path="/course/:courseId" element={<CourseDetail />} />
+                <Route path="/library" element={<Library />} />
+                <Route path="/course-assessment/:courseId" element={<CourseAssessment />} />
                 <Route path="/voice-call" element={<VoiceCallPage />} />
                 <Route path="/test-route" element={<div style={{padding: '20px', background: 'lightblue'}}><h1>Test Route</h1><p>Route works! Time: {new Date().toLocaleTimeString()}</p><button onClick={() => window.history.back()}>Go Back</button></div>} />
-                <Route path="/call" element={<VideoCall />} />
                 <Route path="/chat" element={<Chat />} />
                 <Route path="/achievements" element={<Achievements />} />
-                <Route path="/assessment-level" element={<AssessmentLevel />} />
                 <Route path="/account" element={<PersonalAccount />} />
                 <Route path="/exams" element={<Exams />} />
                 <Route path="/exams/:examType/add" element={<ExamAddCourse />} />
                 <Route path="/terms" element={<Terms />} />
                 <Route path="/privacy" element={<Privacy />} />
-                <Route path="/streaming-test" element={<StreamingChatTest />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
@@ -82,6 +80,7 @@ const App = () => (
       </TooltipProvider>
     </AuthProvider>
   </QueryClientProvider>
-);
+  );
+};
 
 export default App;

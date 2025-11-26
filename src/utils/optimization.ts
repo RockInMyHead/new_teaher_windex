@@ -193,36 +193,6 @@ export const useRequestAnimationFrame = (callback: FrameRequestCallback) => {
 };
 
 /**
- * Local storage hook
- */
-export const useLocalStorage = <T,>(key: string, initialValue: T) => {
-  const [storedValue, setStoredValue] = memo(initialValue as any) as [T, (val: T) => void];
-
-  const setValue = useCallbackDeep((value: T | ((val: T) => T)) => {
-    try {
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
-      setStoredValue(valueToStore);
-      localStorage.setItem(key, JSON.stringify(valueToStore));
-    } catch (error) {
-      console.error('Error setting local storage:', error);
-    }
-  }, [key, storedValue]);
-
-  useEffect(() => {
-    try {
-      const item = localStorage.getItem(key);
-      if (item) {
-        setStoredValue(JSON.parse(item));
-      }
-    } catch (error) {
-      console.error('Error reading local storage:', error);
-    }
-  }, [key, setStoredValue]);
-
-  return [storedValue, setValue] as const;
-};
-
-/**
  * Observer for DOM size changes
  */
 export const useResizeObserver = (ref: React.RefObject<HTMLElement>) => {
@@ -258,7 +228,6 @@ export default {
   useAsync,
   useIntersectionObserver,
   useRequestAnimationFrame,
-  useLocalStorage,
   useResizeObserver,
 };
 

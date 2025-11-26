@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { OpenAITTS } from '@/lib/openaiTTS';
 import { VoiceComm } from '@/lib/voiceComm';
 import { examService } from '@/services';
+import { sessionService } from '@/services/sessionService';
 
 interface CourseData {
   id: number;
@@ -41,13 +42,16 @@ export default function CourseDetail() {
   // Debug logging
   console.log('🎯 CourseDetail rendered:', { courseId, mode, url: window.location.href });
 
-  // Force select-mode for all course views (no progress page)
-  // Check URL pathname to determine if we need to redirect
+  // Check URL pathname to determine current mode
   const pathname = window.location.pathname;
   const isSelectModeUrl = pathname.endsWith('/select-mode');
   const isCourseUrl = /^\/course\/[^\/]+\/?$/.test(pathname); // /course/{id} or /course/{id}/
 
-  if (courseId && !isSelectModeUrl && !mode) {
+  // Determine effective mode (either from URL param or pathname)
+  const effectiveMode = mode || (isSelectModeUrl ? 'select-mode' : null);
+
+  // Force select-mode for all course views (no progress page) - only if not already on select-mode
+  if (courseId && !isSelectModeUrl && !effectiveMode) {
     console.log('🚀 Redirecting to select-mode (current URL:', pathname, 'mode:', mode, ')');
     navigate(`/course/${courseId}/select-mode`, { replace: true });
     return (
@@ -73,10 +77,41 @@ export default function CourseDetail() {
   const historyRef = useRef(conversationHistory);
 
   // Mock lessons data based on course subject
-  const getMockLesson = (lessonNumber: number, courseTitle?: string) => {
-    // Определяем предмет по названию курса
+  const getMockLesson = (lessonNumber: number, courseTitle?: string, courseId?: string) => {
+    // Определяем предмет по courseId (более надежно) или по названию курса
     let subject = 'general';
-    if (courseTitle) {
+
+    // Сначала попробуем определить по courseId
+    if (courseId) {
+      const parts = courseId.split('-');
+      if (parts.length >= 1) {
+        const subjectFromId = parts[0];
+        console.log('🔍 Determining subject from courseId:', courseId, 'extracted subject:', subjectFromId);
+
+        // Маппинг subject ID к правильным названиям для уроков
+        const subjectMap: { [key: string]: string } = {
+          'english': 'english',
+          'russian': 'russian',
+          'math': 'math',
+          'physics': 'physics',
+          'chemistry': 'chemistry',
+          'biology': 'biology',
+          'history': 'history',
+          'geography': 'geography',
+          'informatics': 'informatics',
+          'literature': 'literature',
+          'social-studies': 'social_studies'
+        };
+
+        if (subjectMap[subjectFromId]) {
+          subject = subjectMap[subjectFromId];
+          console.log('📚 Determined subject from courseId:', subject);
+        }
+      }
+    }
+
+    // Fallback: определение по courseTitle (если courseId не помог)
+    if (subject === 'general' && courseTitle) {
       console.log('🔍 Determining subject for courseTitle:', courseTitle, 'lowercased:', courseTitle.toLowerCase());
       if (courseTitle.toLowerCase().includes('физик')) {
         subject = 'physics';
@@ -95,10 +130,12 @@ export default function CourseDetail() {
         subject = 'literature';
       } else if (courseTitle.toLowerCase().includes('английск') || courseTitle.toLowerCase().includes('english')) {
         subject = 'english';
+      } else if (courseTitle.toLowerCase().includes('русск') || courseTitle.toLowerCase().includes('russian')) {
+        subject = 'russian';
       } else if (courseTitle.toLowerCase().includes('арабск')) {
         subject = 'arabic';
       }
-      console.log('📚 Determined subject:', subject, 'for courseTitle:', courseTitle);
+      console.log('📚 Determined subject from courseTitle:', subject, 'for courseTitle:', courseTitle);
     }
 
     const lessonsBySubject: { [key: string]: any[] } = {
@@ -474,6 +511,68 @@ export default function CourseDetail() {
           content: 'Изучение названий времен года, типов погоды и связанных выражений.'
         }
       ],
+      russian: [
+        {
+          number: 1,
+          title: 'Повторение изученного в начальной школе',
+          topic: 'Фонетика и графика',
+          content: 'Звуки и буквы. Алфавит. Гласные и согласные звуки. Твердые и мягкие согласные.'
+        },
+        {
+          number: 2,
+          title: 'Орфография',
+          topic: 'Правописание гласных и согласных',
+          content: 'Правописание безударных гласных в корне слова. Правописание парных согласных.'
+        },
+        {
+          number: 3,
+          title: 'Морфемика',
+          topic: 'Состав слова',
+          content: 'Корень, приставка, суффикс, окончание. Основа слова.'
+        },
+        {
+          number: 4,
+          title: 'Имя существительное',
+          topic: 'Части речи',
+          content: 'Имя существительное как часть речи. Род, число, падеж имен существительных.'
+        },
+        {
+          number: 5,
+          title: 'Имя прилагательное',
+          topic: 'Части речи',
+          content: 'Имя прилагательное как часть речи. Полные и краткие формы прилагательных.'
+        },
+        {
+          number: 6,
+          title: 'Глагол',
+          topic: 'Части речи',
+          content: 'Глагол как часть речи. Время, лицо, число глаголов. Виды глаголов.'
+        },
+        {
+          number: 7,
+          title: 'Синтаксис',
+          topic: 'Предложение',
+          content: 'Предложение как единица речи. Виды предложений. Члены предложения.'
+        },
+        {
+          number: 8,
+          title: 'Пунктуация',
+          topic: 'Знаки препинания',
+          content: 'Знаки препинания в простом и сложном предложении.'
+        },
+        {
+          number: 9,
+          title: 'Текст',
+          topic: 'Работа с текстом',
+          content: 'Анализ текста. Стили и типы речи. План текста.'
+        },
+        {
+          number: 10,
+          title: 'Повторение и закрепление',
+          topic: 'Комплексное повторение',
+          content: 'Комплексное повторение изученного материала. Подготовка к следующему классу.'
+        }
+      ],
       general: [
         {
           number: 1,
@@ -548,7 +647,8 @@ export default function CourseDetail() {
     }
 
     // Иначе генерируем урок на основе номера
-    const baseLesson = subjectLessons[0] || subjectLessons.general[0];
+    const generalLessons = lessonsBySubject.general || [];
+    const baseLesson = subjectLessons[0] || generalLessons[0];
     return {
       number: lessonNumber,
       title: `Урок ${lessonNumber}: ${baseLesson.title.split(': ').slice(1).join(': ') || 'Тема урока'}`,
@@ -571,97 +671,29 @@ export default function CourseDetail() {
     console.log('🔍 Starting to load learning plan for courseId:', courseId, 'type:', typeof courseId);
 
     try {
-      // Сначала пытаемся найти план в localStorage (может быть сохранен из CoursesPage)
-      const savedPlansStr = localStorage.getItem('userLearningPlans');
-      console.log('📦 Checking localStorage for plans:', savedPlansStr ? 'EXISTS' : 'NOT FOUND');
+      // Try to load from user state in DB
+      const userState = await sessionService.getUserState();
+      console.log('📦 Checking user state for course data:', userState ? 'EXISTS' : 'NOT FOUND');
 
-      if (savedPlansStr) {
-        try {
-          const savedPlans = JSON.parse(savedPlansStr);
-          console.log('📦 Parsed saved plans keys:', Object.keys(savedPlans));
-          console.log('📦 Available plans:', Object.keys(savedPlans).map(key => ({
-            key,
-            title: savedPlans[key]?.plan_data?.courseInfo?.title,
-            courseId: savedPlans[key]?.course_id
-          })));
-
-          // Пытаемся найти план по courseId
-          let plan = savedPlans[courseId] || savedPlans[courseId.toString()];
-          console.log('🔍 Direct lookup result for courseId', courseId, ':', plan ? 'FOUND' : 'NOT FOUND');
-
-          // Если не нашли по ID, пытаемся найти по названию курса
-          if (!plan) {
-            const savedCourseData = localStorage.getItem('selectedCourseData');
-            console.log('📋 Checking selectedCourseData:', savedCourseData ? 'EXISTS' : 'NOT FOUND');
-
-            if (savedCourseData) {
-              const courseData = JSON.parse(savedCourseData);
-              const courseTitle = courseData.title;
-              console.log('📋 Course title from localStorage:', courseTitle);
-
-              // Ищем план, где название курса совпадает (проверяем разные поля)
-              for (const [key, planData] of Object.entries(savedPlans)) {
-                const planTitle = planData.plan_data?.courseInfo?.title;
-                const planSubject = planData.subject_name;
-                
-                console.log('🔍 Checking plan:', {
-                  key,
-                  planTitle,
-                  planSubject,
-                  courseTitle,
-                  titleMatch: planTitle === courseTitle,
-                  subjectMatch: planSubject === courseTitle
-                });
-
-                // Сравниваем по названию курса или subject_name
-                if (planTitle === courseTitle || planSubject === courseTitle) {
-                  plan = planData;
-                  console.log('✅ Learning plan found by course title:', courseTitle, 'key:', key);
-                  break;
-                }
-              }
-
-              // Если все еще не нашли, попробуем частичное совпадение
-              if (!plan) {
-                console.log('🔍 Trying partial match...');
-                for (const [key, planData] of Object.entries(savedPlans)) {
-                  const planTitle = planData.plan_data?.courseInfo?.title || '';
-                  const planSubject = planData.subject_name || '';
-                  
-                  // Проверяем частичное совпадение (например "Китайский язык" в "Китайский язык для 5 класса")
-                  if (planTitle.includes(courseTitle) || courseTitle.includes(planTitle) ||
-                      planSubject.includes(courseTitle) || courseTitle.includes(planSubject)) {
-                    plan = planData;
-                    console.log('✅ Learning plan found by partial match:', courseTitle, 'key:', key);
-                    break;
-                  }
-                }
-              }
-            }
-          }
-
-          if (plan) {
-            console.log('✅ Learning plan found in localStorage:', {
-              title: plan.plan_data?.courseInfo?.title,
-              lessonsCount: plan.plan_data?.lessons?.length,
-              courseId: plan.course_id
-            });
-            setLearningPlan(plan);
-            return plan;
-          } else {
-            console.log('❌ No plan found in localStorage for courseId:', courseId);
-          }
-        } catch (error) {
-          console.warn('⚠️ Failed to parse saved plans from localStorage:', error);
-        }
+      if (userState?.selectedCourseData) {
+        const courseData = userState.selectedCourseData;
+        console.log('📋 Course data from user state:', courseData);
       }
 
       // Если не нашли в localStorage, пытаемся загрузить из API
       if (user?.id) {
         console.log('🌐 Loading learning plan from API for user:', user.id, 'course:', courseId);
-        const response = await fetch(`/api/db/learning-plans/${user.id}/${courseId}`);
+        const response = await fetch(`/api/learning-plans/${user.id}/${courseId}`);
 
         if (response.ok) {
+          // Check content-type before parsing JSON
+          const contentType = response.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            console.warn('⚠️ API returned non-JSON response for learning plan. Backend may not be running.');
+            return null;
+          }
+
+          try {
           const responseData = await response.json();
           console.log('✅ API Response for plan:', responseData);
           
@@ -674,8 +706,12 @@ export default function CourseDetail() {
           });
           setLearningPlan(plan);
           return plan;
+          } catch (jsonError) {
+            console.error('❌ Failed to parse learning plan JSON:', jsonError);
+            return null;
+          }
         } else {
-          console.log('❌ API returned error for plan:', response.status, await response.text());
+          console.log('❌ API returned error for plan:', response.status);
         }
       }
 
@@ -689,25 +725,25 @@ export default function CourseDetail() {
 
   // Redirect to select-mode if no mode is specified
   useEffect(() => {
-    if (!mode && courseId) {
+    if (!effectiveMode && courseId) {
       console.log('🔄 No mode specified, redirecting to select-mode');
       navigate(`/course/${courseId}/select-mode`, { replace: true });
       return;
     }
-  }, [mode, courseId, navigate]);
+  }, [effectiveMode, courseId, navigate]);
 
   useEffect(() => {
-    if (mode) { // Only load if we have a mode (prevents loading before redirect)
+    if (effectiveMode) { // Only load if we have a mode (prevents loading before redirect)
       loadCourse();
     }
-  }, [courseId, currentLessonNumber, mode]);
+  }, [courseId, currentLessonNumber, effectiveMode]);
 
   // Debug useParams after component mounts
   useEffect(() => {
-    console.log('🔍 useParams after mount:', { courseId, mode });
+    console.log('🔍 useParams after mount:', { courseId, mode, effectiveMode });
     const url = window.location.pathname;
     console.log('🔍 Current URL pathname:', url);
-  }, [courseId, mode]);
+  }, [courseId, mode, effectiveMode]);
 
   const loadCourse = async () => {
     try {
@@ -722,18 +758,12 @@ export default function CourseDetail() {
         // Загружаем данные курса экзамена через API
         let examCourse = null;
         try {
-          const userId = 'default_user';
+          const userId = sessionService.getUserId();
           const response = await examService.getUserExamCourses(userId);
           const examCourses = response.examCourses || [];
           examCourse = examCourses.find((course: any) => course.id === courseId);
         } catch (apiError) {
-          console.error('❌ Failed to load exam course from API, falling back to localStorage:', apiError);
-          // Fallback to localStorage
-          const storedCourses = localStorage.getItem('examCourses');
-          if (storedCourses) {
-            const examCourses = JSON.parse(storedCourses);
-            examCourse = examCourses.find((course: any) => course.id === courseId);
-          }
+          console.error('❌ Failed to load exam course from API:', apiError);
         }
 
         if (examCourse) {
@@ -760,7 +790,7 @@ export default function CourseDetail() {
 
             // Для экзаменационных курсов используем getMockLesson с названием предмета
             console.log('📚 Getting mock lesson for exam course:', examCourse.subject, 'lesson number:', currentLessonNumber);
-            currentLesson = getMockLesson(currentLessonNumber, examCourse.subject);
+            currentLesson = getMockLesson(currentLessonNumber, examCourse.subject, courseId);
             console.log('⚠️ Using mock lesson for exam course:', {
               title: currentLesson.title,
               topic: currentLesson.topic,
@@ -790,27 +820,28 @@ export default function CourseDetail() {
       // Получаем данные курса
       let courseData: any = null;
 
-      // Сначала пытаемся получить данные из localStorage
-      const savedCourseData = localStorage.getItem('selectedCourseData');
-      if (savedCourseData) {
-        console.log('📦 Loading course from localStorage');
-        const parsedCourseData = JSON.parse(savedCourseData);
+      // Сначала пытаемся получить данные из user state в БД
+      const userState = await sessionService.getUserState();
+      if (userState?.selectedCourseData) {
+        console.log('📦 Loading course from user state');
+        const parsedCourseData = userState.selectedCourseData;
         console.log('📦 Parsed course data:', parsedCourseData);
-        console.log('🔍 Comparing IDs - URL courseId:', courseId, 'localStorage id:', parsedCourseData.id);
+        console.log('🔍 Comparing IDs - URL courseId:', courseId, 'user state id:', parsedCourseData.id);
         
-        // КРИТИЧНО: Проверяем, что ID курса совпадает с URL
-        if (parsedCourseData.id === courseId || parsedCourseData.id === courseId.toString()) {
+        // КРИТИЧНО: Проверяем, что ID курса совпадает с URL и данные полные
+        if ((parsedCourseData.id === courseId || parsedCourseData.id === courseId?.toString()) &&
+            parsedCourseData.title && parsedCourseData.description && parsedCourseData.subject) {
           courseData = parsedCourseData;
-          console.log('✅ Course IDs match, using localStorage data');
+          console.log('✅ Course IDs match and data is complete, using user state data');
         } else {
-          console.warn('⚠️ Course ID mismatch! URL:', courseId, 'localStorage:', parsedCourseData.id);
-          console.log('🧹 Clearing mismatched course data');
-          localStorage.removeItem('selectedCourseData');
+          console.warn('⚠️ Course data incomplete or ID mismatch! URL:', courseId, 'user state ID:', parsedCourseData.id);
+          console.log('🧹 Clearing incomplete course data');
+          await sessionService.clearCourseState();
           courseData = null;
         }
       }
       
-      // Если нет в localStorage или ID не совпал, пытаемся получить из API
+      // Если нет в user state или ID не совпал, пытаемся получить из API
       if (!courseData) {
         console.log('📡 Loading course from API:', courseId);
         try {
@@ -846,7 +877,7 @@ export default function CourseDetail() {
             content: currentLesson.content?.substring(0, 50) + '...'
           });
         } else {
-          currentLesson = getMockLesson(currentLessonNumber, courseData.title);
+          currentLesson = getMockLesson(currentLessonNumber, courseData.title, courseId);
           console.log('⚠️ Using mock lesson:', {
             title: currentLesson.title,
             topic: currentLesson.topic,
@@ -874,7 +905,7 @@ export default function CourseDetail() {
           modules: 34,
           completedModules: 0,
           students: 1,
-          currentLesson: getMockLesson(currentLessonNumber, 'Курс не найден')
+          currentLesson: getMockLesson(currentLessonNumber, 'Курс не найден', courseId)
         };
         setCourse(mockCourseData);
       }
@@ -891,7 +922,7 @@ export default function CourseDetail() {
         modules: 34,
         completedModules: 0,
         students: 1,
-        currentLesson: getMockLesson(currentLessonNumber, 'Курс не найден')
+        currentLesson: getMockLesson(currentLessonNumber, 'Курс не найден', courseId)
       };
       setCourse(mockCourseData);
     } finally {
@@ -901,25 +932,21 @@ export default function CourseDetail() {
 
   const startInteractiveLesson = async () => {
     // Check if we're already on select-mode page - if yes, proceed directly to chat
-    const urlParams = new URLSearchParams(window.location.search);
-    const mode = urlParams.get('mode');
-
-    if (mode === 'select-mode') {
+    if (effectiveMode === 'select-mode') {
       console.log('🚀 [COURSE DETAIL] Already on select-mode page, proceeding directly to chat');
     } else {
       console.log('🚀 [COURSE DETAIL] startInteractiveLesson called - starting new chat session');
       console.log('📍 Current location:', window.location.href);
     }
 
-    // Clear any existing chat data to start fresh
-    localStorage.removeItem('chatMessages');
-    localStorage.removeItem('chatHistory');
-    localStorage.removeItem('lessonContext');
-    localStorage.removeItem('currentCourse'); // Clear old course data
-    localStorage.removeItem('personalizedCourseData'); // Clear any cached course data
-    localStorage.removeItem('currentLessonContext');
+    // Clear any existing course state in DB
+    await sessionService.clearCourseState();
+    // Also clear chat history for this course to start fresh
+    if (course?.id) {
+      await sessionService.clearChatHistory(String(course.id));
+    }
 
-    const userId = 'default_user'; // TODO: получить реальный userId из контекста авторизации
+    const userId = sessionService.getUserId();
 
     // Save course info for the chat session with lesson context
     const courseData = {
@@ -930,39 +957,16 @@ export default function CourseDetail() {
       currentLesson: course?.currentLesson
     };
 
-    // Get or create lesson session data
-    const lessonSessionKey = `lesson_session_${course?.id}`;
-    const existingSession = localStorage.getItem(lessonSessionKey);
-    let sessionData;
-
-    if (existingSession) {
-      sessionData = JSON.parse(existingSession);
-      // Increment lesson number for next lesson
-      sessionData.lessonNumber = (sessionData.lessonNumber || 0) + 1;
-      sessionData.lastLessonDate = new Date().toISOString();
-    } else {
-      // First lesson
-      sessionData = {
-        lessonNumber: 1,
-        completedLessons: [],
-        homeworks: [],
-        lastLessonDate: new Date().toISOString()
-      };
-    }
-
-    // Save lesson session
-    localStorage.setItem(lessonSessionKey, JSON.stringify(sessionData));
+    // Prepare course data for lesson mode
     
-    // Save current course with session info
-    const courseWithSession = {
-      ...courseData,
-      sessionData,
-      userId // Добавляем userId для использования в Chat
-    };
+    // Save current course info to user state in DB
+    await sessionService.saveUserState({
+      currentCourseId: String(course?.id || 'default'),
+      currentLessonData: course?.currentLesson,
+      courseInfo: courseData
+    });
 
-    localStorage.setItem('currentCourse', JSON.stringify(courseWithSession));
-
-    console.log('💾 [COURSE DETAIL] Saved course data for chat session:', courseData);
+    console.log('💾 [COURSE DETAIL] Saved course data to DB for chat session:', courseData);
 
     // Начинаем урок в БД
     try {
@@ -972,18 +976,23 @@ export default function CourseDetail() {
       if (course?.currentLesson) {
         console.log('📝 Starting lesson in database...');
         
+        // Сначала убеждаемся, что пользователь записан на курс
+        const courseIdStr = String(course.id || '');
+        const enrollResult = await learningProgressService.ensureUserCourse(userId, courseIdStr);
+        console.log('✅ User enrolled in course:', enrollResult.userCourse.id);
+
         // Получаем user_course_id
-        const progressData = await learningProgressService.getUserCourseProgress(userId, course.id as string);
-        
+        const progressData = await learningProgressService.getUserCourseProgress(userId, courseIdStr);
+
         if (progressData.userCourse) {
-          // Стартуем урок (в реальной системе нужно получить lesson_id из БД)
-          // Пока используем mock ID
-          const lessonId = `lesson_${course.id}_${sessionData.lessonNumber}`;
+          // Стартуем урок (всегда начинаем с первого урока)
+          const lessonNumber = 1;
           
           await learningProgressService.startLesson({
             userId,
-            lessonId,
-            userCourseId: progressData.userCourse.id
+            courseId: courseIdStr,
+            lessonNumber,
+            userCourseId: String(progressData.userCourse.id)
           });
           
           console.log('✅ Lesson started in database');
@@ -994,24 +1003,39 @@ export default function CourseDetail() {
       // Продолжаем даже если не удалось записать в БД
     }
 
-    if (mode === 'select-mode') {
+    if (effectiveMode === 'select-mode') {
       // Already on select-mode page, proceed directly to chat
       console.log('🧭 [COURSE DETAIL] Already on select-mode, proceeding directly to chat...');
-      const courseId = course?.id;
-      const lessonId = course?.currentLesson?.id || `lesson_${courseId}_1`;
-      navigate(`/chat?course=${courseId}&lesson=${lessonId}&mode=lesson`);
+      // Use course?.id or fall back to courseId from URL params
+      const validCourseId = course?.id || courseId;
+      
+      // Validate courseId before navigation
+      if (!validCourseId || validCourseId === 'undefined' || validCourseId === 'null' || validCourseId === 'NaN') {
+        console.error('❌ Invalid courseId, cannot navigate to chat:', validCourseId);
+        return;
+      }
+      
+      const lessonId = (course?.currentLesson && 'id' in course.currentLesson ? course.currentLesson.id : undefined) || `lesson_${validCourseId}_1`;
+      navigate(`/chat?course=${validCourseId}&lesson=${lessonId}&mode=lesson`);
       console.log('✅ [COURSE DETAIL] navigate() called successfully to chat:', {
-        course: courseId,
+        course: validCourseId,
         lesson: lessonId,
         mode: 'lesson'
       });
     } else {
       // Navigate to learning mode selection page
       console.log('🧭 [COURSE DETAIL] Navigating to learning mode selection...');
-      const courseId = course?.id;
-      navigate(`/course/${courseId}/select-mode`);
+      const validCourseId = course?.id || courseId;
+      
+      // Validate courseId before navigation
+      if (!validCourseId || validCourseId === 'undefined' || validCourseId === 'null' || validCourseId === 'NaN') {
+        console.error('❌ Invalid courseId, cannot navigate to select-mode:', validCourseId);
+        return;
+      }
+      
+      navigate(`/course/${validCourseId}/select-mode`);
       console.log('✅ [COURSE DETAIL] navigate() called successfully for mode selection:', {
-        course: courseId
+        course: validCourseId
       });
     }
   };
@@ -1046,8 +1070,8 @@ export default function CourseDetail() {
 
       await OpenAITTS.speak(greeting, {
         voice: 'nova',
-        speed: 1.0,
-        onEnd: async () => {
+        speed: 1.0
+      });
           console.log('✅ Greeting TTS ended, starting voice recognition');
           setIsLessonSpeaking(false);
           try {
@@ -1055,12 +1079,6 @@ export default function CourseDetail() {
           } catch (error) {
             console.error('❌ Failed to start voice recognition after greeting:', error);
           }
-        },
-        onError: (error) => {
-          console.error('❌ Greeting TTS error:', error);
-          setIsLessonSpeaking(false);
-        }
-      });
     } catch (error) {
       console.error('❌ Failed to speak greeting:', error);
       setIsLessonSpeaking(false);
@@ -1135,7 +1153,7 @@ export default function CourseDetail() {
 - Для омографов (зам+ок/з+амок) обязательно ставь ударение по контексту.
 
 ПЛАН ТЕКУЩЕГО УРОКА:
-${currentLesson.aspects || 'Изучаем основы'}
+${('aspects' in currentLesson && currentLesson.aspects) || 'Изучаем основы'}
 
 ТЕКУЩИЙ УРОК: "${currentLesson.title || 'Урок'}" (${currentLesson.topic || 'Тема'})
 КОНТЕКСТ РАЗГОВОРА:
@@ -1157,7 +1175,7 @@ ${context}
               { role: 'system', content: systemPrompt },
               { role: 'user', content: `Ученик только что сказал: "${text}". Продолжи урок.` }
               ],
-              model: 'gpt-4o-mini',
+              model: 'gpt-5.1',
               temperature: 0.7,
               max_tokens: 300
             }),
@@ -1175,13 +1193,11 @@ ${context}
 
             await OpenAITTS.speak(teacherResponse, {
               voice: 'nova',
-              speed: 1.0,
-              onEnd: () => {
+              speed: 1.0
+            });
                 setTimeout(() => {
                   VoiceComm.startListening();
               }, 1000);
-            }
-            });
           }
         } catch (error) {
             const err = error as Error;
@@ -1214,8 +1230,8 @@ ${context}
       try {
         console.log('🔊 Activating audio context...');
 
-        if (typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined') {
-          const AudioContextClass = AudioContext || webkitAudioContext;
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (typeof AudioContextClass !== 'undefined') {
           const audioContext = new AudioContextClass();
           if (audioContext.state === 'suspended') {
             await audioContext.resume();
@@ -1305,12 +1321,9 @@ ${context}
     }
   };
 
-  const startVoiceCall = () => {
+  const startVoiceCall = async () => {
     // Check if we're already on select-mode page - if yes, proceed directly to voice call
-    const urlParams = new URLSearchParams(window.location.search);
-    const mode = urlParams.get('mode');
-
-    if (mode === 'select-mode') {
+    if (effectiveMode === 'select-mode') {
       console.log('🎯 [COURSE DETAIL] Already on select-mode page, proceeding directly to voice call');
     } else {
       console.log('🎯 [COURSE DETAIL] Navigating to voice-call page with lesson context');
@@ -1321,34 +1334,48 @@ ${context}
       currentLesson: course?.currentLesson
     });
 
-    // Ensure lesson data is saved before navigation
-    const lessonData = {
-      number: course?.currentLesson?.number || 1,
-      title: course?.currentLesson?.title || course?.title || 'Урок',
-      grade: course?.grade || '5 класс',
-      topic: course?.currentLesson?.topic || course?.description || '',
-      aspects: course?.description || '',
-      description: course?.currentLesson?.content || course?.currentLesson?.aspects || course?.currentLesson?.description || course?.description || ''
+    // Clear any existing course state in DB (same as startInteractiveLesson)
+    await sessionService.clearCourseState();
+    // Also clear chat history for this course to start fresh
+    if (course?.id) {
+      await sessionService.clearChatHistory(String(course.id));
+    }
+
+    // Save course info for the voice session with FULL lesson context (same structure as chat)
+    const courseData = {
+      id: course?.id,
+      title: course?.title,
+      grade: course?.grade,
+      description: course?.description,
+      currentLesson: course?.currentLesson
     };
 
-    console.log('💾 Saving to localStorage:', lessonData);
+    // Prepare course data for voice mode
 
-    localStorage.setItem('currentLesson', JSON.stringify(lessonData));
-    localStorage.setItem('courseInfo', JSON.stringify({
-      courseId: course?.id,
-      title: course?.title,
-      grade: course?.grade
-    }));
+    // ВАЖНО: Используем courseId из параметров URL, а не course?.id
+    const courseIdToSave = courseId || String(course?.id || 'default');
 
-    if (mode === 'select-mode') {
+    // Save current course info to user state in DB (SAME as startInteractiveLesson)
+    await sessionService.saveUserState({
+      currentCourseId: courseIdToSave,
+      currentLessonData: course?.currentLesson, // Use full currentLesson object, same as chat
+      courseInfo: courseData
+    });
+
+    console.log('💾 [COURSE DETAIL] Saved course data to DB for voice session:', courseData);
+    console.log('💾 [COURSE DETAIL] currentCourseId saved:', courseIdToSave);
+    console.log('💾 [COURSE DETAIL] currentLessonData:', course?.currentLesson);
+
+    if (effectiveMode === 'select-mode') {
       // Already on select-mode page, proceed directly to voice call
-      console.log('✅ Lesson data saved, navigating directly to /voice-call');
-      navigate('/voice-call');
+      console.log('✅ Lesson data saved, navigating directly to /voice-call with courseId');
+      // ВАЖНО: Передаём courseId в URL для загрузки профиля и контекста
+      navigate(`/voice-call?course=${courseIdToSave}`);
     } else {
       // Navigate to learning mode selection page
       console.log('✅ Lesson data saved, navigating to learning mode selection');
-      const courseId = course?.id;
-      navigate(`/course/${courseId}/select-mode`);
+      const courseIdForNav = course?.id;
+      navigate(`/course/${courseIdForNav}/select-mode`);
     }
   };
 
@@ -1374,7 +1401,7 @@ ${context}
   };
 
   // Immediate redirect if no mode specified (before any rendering)
-  if (!mode && courseId) {
+  if (!effectiveMode && courseId) {
     console.log('🚀 Immediate redirect to select-mode for course:', courseId);
     // Use setTimeout to ensure navigation happens after render
     setTimeout(() => {
@@ -1402,8 +1429,8 @@ ${context}
   }
 
   // Если это режим выбора типа обучения - показать страницу выбора ДО рендеринга страницы прогресса
-  console.log('🔍 Checking mode for select-mode:', mode);
-  if (mode === 'select-mode') {
+  console.log('🔍 Checking mode for select-mode:', effectiveMode);
+  if (effectiveMode === 'select-mode') {
     console.log('✅ Showing select-mode page');
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100">
@@ -1575,14 +1602,21 @@ ${context}
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600 text-xs md:text-sm">{course.completedModules} из {course.modules} уроков</span>
-                  <span className="font-medium text-gray-900 text-xs md:text-sm">{progressPercentage}%</span>
-                </div>
-                <Progress value={progressPercentage} className="h-2" />
-                <p className="text-xs md:text-sm text-gray-500 text-center">
-                  {progressPercentage === 0 ? 'Начните обучение прямо сейчас' : 'Продолжайте обучение'}
-                </p>
+                {(() => {
+                  const progressPercentage = course.modules > 0 ? Math.round((course.completedModules / course.modules) * 100) : 0;
+                  return (
+                    <>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600 text-xs md:text-sm">{course.completedModules} из {course.modules} уроков</span>
+                        <span className="font-medium text-gray-900 text-xs md:text-sm">{progressPercentage}%</span>
+                      </div>
+                      <Progress value={progressPercentage} className="h-2" />
+                      <p className="text-xs md:text-sm text-gray-500 text-center">
+                        {progressPercentage === 0 ? 'Начните обучение прямо сейчас' : 'Продолжайте обучение'}
+                      </p>
+                    </>
+                  );
+                })()}
               </div>
 
               <div className="grid grid-cols-2 gap-3 md:gap-4 mt-4 md:mt-6">
@@ -1632,7 +1666,10 @@ ${context}
                 <h3 className="text-base md:text-lg font-semibold text-gray-900 mb-3">Содержание урока</h3>
                 <div className="bg-gray-50 p-3 md:p-4 rounded-lg border border-gray-100">
                   <p className="text-gray-700 leading-relaxed whitespace-pre-wrap text-sm md:text-base">
-                    {course.currentLesson?.content || course.currentLesson?.aspects || course.currentLesson?.description || course.description}
+                    {course.currentLesson?.content || 
+                     (course.currentLesson && typeof course.currentLesson === 'object' && 'aspects' in course.currentLesson ? (course.currentLesson as any).aspects : null) || 
+                     (course.currentLesson && typeof course.currentLesson === 'object' && 'description' in course.currentLesson ? (course.currentLesson as any).description : null) || 
+                     course.description}
                   </p>
                 </div>
               </div>

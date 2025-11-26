@@ -26,8 +26,8 @@ router.post('/enroll', async (req, res) => {
       [userId, courseId]
     );
 
-    if (existing.length > 0) {
-      return res.json({ userCourse: existing[0] });
+    if (existing.rows.length > 0) {
+      return res.json({ userCourse: existing.rows[0] });
     }
 
     // Записываем пользователя на курс
@@ -50,6 +50,89 @@ router.post('/enroll', async (req, res) => {
 });
 
 /**
+ * @route   POST /api/learning-progress/users/courses/enroll
+ * @desc    Записать пользователя на курс
+ * @access  Private
+ */
+router.post('/users/courses/enroll', async (req, res) => {
+  try {
+    const { userId, courseId } = req.body;
+
+    if (!userId || !courseId) {
+      return res.status(400).json({ error: 'Missing required fields: userId, courseId' });
+    }
+
+    // Проверяем, существует ли курс
+    const courseResult = await db.query(
+      'SELECT * FROM courses WHERE id = ?',
+      [courseId]
+    );
+
+    if (!courseResult.rows || courseResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
+    const course = courseResult.rows[0];
+
+    // Проверяем, не записан ли уже пользователь на курс
+    const existingUserCourse = await db.query(
+      'SELECT * FROM user_courses WHERE user_id = ? AND course_id = ?',
+      [userId, courseId]
+    );
+
+    if (existingUserCourse.rows.length > 0) {
+      // Возвращаем существующую запись
+      return res.json({
+        userCourse: {
+          id: existingUserCourse.rows[0].id,
+          userId: existingUserCourse.rows[0].user_id,
+          courseId: existingUserCourse.rows[0].course_id,
+          progress: existingUserCourse.rows[0].progress_percentage,
+          enrolledAt: existingUserCourse.rows[0].enrolled_at,
+          lastAccessedAt: existingUserCourse.rows[0].last_accessed_at,
+          status: existingUserCourse.rows[0].status
+        }
+      });
+    }
+
+    // Создаем новую запись
+    await db.query(
+      `INSERT INTO user_courses (user_id, course_id, progress_percentage)
+       VALUES (?, ?, 0)`,
+      [userId, courseId]
+    );
+
+    // Получаем созданную запись по user_id и course_id
+    const newUserCourseResult = await db.query(
+      'SELECT * FROM user_courses WHERE user_id = ? AND course_id = ?',
+      [userId, courseId]
+    );
+
+    if (newUserCourseResult.rows.length === 0) {
+      return res.status(500).json({ error: 'Failed to create user course record' });
+    }
+
+    const newUserCourse = newUserCourseResult.rows[0];
+
+    res.json({
+      userCourse: {
+        id: newUserCourse.id,
+        userId: newUserCourse.user_id,
+        courseId: newUserCourse.course_id,
+        progress: newUserCourse.progress_percentage,
+        enrolledAt: newUserCourse.enrolled_at,
+        lastAccessedAt: newUserCourse.last_accessed_at,
+        status: newUserCourse.status
+      }
+    });
+
+  } catch (error) {
+    console.error('Error enrolling user in course:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
  * @route   GET /api/learning-progress/users/:userId/courses/:courseId
  * @desc    Получить прогресс пользователя по курсу
  * @access  Private
@@ -64,11 +147,11 @@ router.get('/users/:userId/courses/:courseId', async (req, res) => {
       [userId, courseId]
     );
 
-    if (userCourseResult.length === 0) {
+    if (userCourseResult.rows.length === 0) {
       return res.status(404).json({ error: 'User course not found' });
     }
 
-    const userCourse = userCourseResult[0];
+    const userCourse = userCourseResult.rows[0];
 
     // Получаем прогресс по урокам
     const lessons = await db.query(
@@ -80,7 +163,7 @@ router.get('/users/:userId/courses/:courseId', async (req, res) => {
       [userId, userCourse.id]
     );
 
-    res.json({ userCourse, lessons });
+    res.json({ userCourse, lessons: lessons.rows });
   } catch (error) {
     console.error('Error fetching user course progress:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -94,36 +177,48 @@ router.get('/users/:userId/courses/:courseId', async (req, res) => {
  */
 router.post('/lessons/start', async (req, res) => {
   try {
-    const { userId, lessonId, userCourseId } = req.body;
+    const { userId, courseId, lessonNumber, userCourseId } = req.body;
 
-    if (!userId || !lessonId || !userCourseId) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!userId || !courseId || !lessonNumber || !userCourseId) {
+      return res.status(400).json({ error: 'Missing required fields: userId, courseId, lessonNumber, userCourseId' });
     }
+
+    // Получаем реальный ID урока из базы данных
+    const lessonResult = await db.query(
+      'SELECT * FROM lessons WHERE course_id = ? AND lesson_number = ?',
+      [courseId, lessonNumber]
+    );
+
+    if (lessonResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Lesson not found' });
+    }
+
+    const lesson = lessonResult.rows[0];
 
     // Проверяем, не начат ли уже урок
     const existing = await db.query(
       'SELECT * FROM user_lessons WHERE user_id = ? AND lesson_id = ?',
-      [userId, lessonId]
+      [userId, lesson.id]
     );
 
-    if (existing.length > 0) {
+    if (existing.rows.length > 0) {
       // Обновляем статус, если урок уже существует
       await db.query(
-        `UPDATE user_lessons 
+        `UPDATE user_lessons
          SET status = 'in_progress', started_at = datetime('now'), attempts_count = attempts_count + 1, updated_at = datetime('now')
          WHERE id = ?`,
-        [existing[0].id]
+        [existing.rows[0].id]
       );
 
-      const updated = await db.query('SELECT * FROM user_lessons WHERE id = ?', [existing[0].id]);
-      return res.json({ lessonProgress: updated[0] });
+      const updated = await db.query('SELECT * FROM user_lessons WHERE id = ?', [existing.rows[0].id]);
+      return res.json({ lessonProgress: updated.rows[0] });
     }
 
     // Создаем новую запись прогресса урока
     const result = await db.query(
       `INSERT INTO user_lessons (user_id, lesson_id, user_course_id, status, started_at, attempts_count)
        VALUES (?, ?, ?, 'in_progress', datetime('now'), 1)`,
-      [userId, lessonId, userCourseId]
+      [userId, lesson.id, userCourseId]
     );
 
     const lessonProgress = await db.query(
@@ -131,13 +226,32 @@ router.post('/lessons/start', async (req, res) => {
       [result.lastID]
     );
 
+    if (lessonProgress.rows.length === 0) {
+      // Fallback: попробуем найти по параметрам
+      const fallback = await db.query(
+        'SELECT * FROM user_lessons WHERE user_id = ? AND lesson_id = ? AND user_course_id = ?',
+        [userId, lesson.id, userCourseId]
+      );
+      
+      if (fallback.rows.length > 0) {
+        // Обновляем время последнего доступа к курсу
+        await db.query(
+          `UPDATE user_courses SET last_accessed_at = datetime('now') WHERE id = ?`,
+          [userCourseId]
+        );
+        return res.status(201).json({ lessonProgress: fallback.rows[0] });
+      }
+
+      return res.status(500).json({ error: 'Failed to create lesson progress record' });
+    }
+
     // Обновляем время последнего доступа к курсу
     await db.query(
       `UPDATE user_courses SET last_accessed_at = datetime('now') WHERE id = ?`,
       [userCourseId]
     );
 
-    res.status(201).json({ lessonProgress: lessonProgress[0] });
+    res.status(201).json({ lessonProgress: lessonProgress.rows[0] });
   } catch (error) {
     console.error('Error starting lesson:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -281,7 +395,7 @@ router.post('/homework/submit', async (req, res) => {
       [userId, lessonId]
     );
 
-    res.json({ lessonProgress: lessonProgress[0] });
+    res.json({ lessonProgress: lessonProgress.rows[0] });
   } catch (error) {
     console.error('Error submitting homework:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -327,7 +441,7 @@ router.get('/users/:userId/homeworks', async (req, res) => {
 
     const homeworks = await db.query(query, params);
 
-    res.json({ homeworks });
+    res.json({ homeworks: homeworks.rows });
   } catch (error) {
     console.error('Error fetching homeworks:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -361,7 +475,7 @@ router.get('/users/:userId/courses/:courseId/llm-context', async (req, res) => {
       [userId, courseId]
     );
 
-    const userCourse = userCourseResult.length > 0 ? userCourseResult[0] : null;
+    const userCourse = userCourseResult.rows.length > 0 ? userCourseResult.rows[0] : null;
 
     // Получаем текущий урок
     let currentLesson = null;
@@ -464,11 +578,11 @@ router.get('/users/:userId/courses/:courseId/next-lesson', async (req, res) => {
       [userId, courseId]
     );
 
-    if (userCourseResult.length === 0) {
+    if (userCourseResult.rows.length === 0) {
       return res.status(404).json({ error: 'User course not found' });
     }
 
-    const userCourse = userCourseResult[0];
+    const userCourse = userCourseResult.rows[0];
 
     // Получаем следующий урок
     const nextLessonResult = await db.query(
@@ -547,7 +661,7 @@ router.post('/study-time/update', async (req, res) => {
       [userId, courseId]
     );
 
-    res.json({ userCourse: userCourse[0] });
+    res.json({ userCourse: userCourse.rows[0] });
   } catch (error) {
     console.error('Error updating study time:', error);
     res.status(500).json({ error: 'Internal server error' });

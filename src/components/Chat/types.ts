@@ -27,6 +27,7 @@ export interface ChatMessagesProps {
   isLoading?: boolean;
   onMessageRemove?: (id: string) => void;
   streamingMessage?: Message | null;
+  isLessonMode?: boolean;
 }
 
 
@@ -77,6 +78,9 @@ export interface ChatContainerProps {
   onChatEnd?: () => void;
   initialMessages?: Message[];
   onSendMessage?: (message: string) => Promise<void>;
+  isLessonMode?: boolean;
+  /** Course ID for per-course chat history separation */
+  courseId?: string;
 }
 
 // ============= INTERNAL STATE =============

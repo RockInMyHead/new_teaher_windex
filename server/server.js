@@ -6,7 +6,8 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const app = express();
 
@@ -25,17 +26,21 @@ app.get('/health', (req, res) => {
 const usersRoutes = require('./routes/users');
 const coursesRoutes = require('./routes/courses');
 const chatRoutes = require('./routes/chat');
-const learningPlansRoutes = require('./routes/learningPlans');
 const examsRoutes = require('./routes/exams');
 const learningProgressRoutes = require('./routes/learningProgress');
+const learningProfileRoutes = require('./routes/learningProfile');
+const llmRoutes = require('./routes/llm');
+const sessionsRoutes = require('./routes/sessions');
 
 // Mount routes
 app.use('/api/users', usersRoutes);
 app.use('/api/courses', coursesRoutes);
 app.use('/api/chat', chatRoutes);
-app.use('/api/learning-plans', learningPlansRoutes);
 app.use('/api/exams', examsRoutes);
 app.use('/api/learning-progress', learningProgressRoutes);
+app.use('/api/learning-profile', learningProfileRoutes);
+app.use('/api/sessions', sessionsRoutes);
+app.use('/api', llmRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

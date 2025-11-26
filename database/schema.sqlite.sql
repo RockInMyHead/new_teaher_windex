@@ -36,134 +36,16 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
 
 -- =====================================================
--- COURSES & CURRICULUM
+-- COURSES REMOVED - NOW STORED IN CONFIG
 -- =====================================================
-
-CREATE TABLE IF NOT EXISTS courses (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    title TEXT NOT NULL,
-    description TEXT,
-    subject TEXT NOT NULL,
-    grade INTEGER,
-    exam_type TEXT,
-    
-    difficulty_level TEXT DEFAULT 'medium' CHECK (difficulty_level IN ('easy', 'medium', 'hard')),
-    total_lessons INTEGER DEFAULT 0,
-    estimated_hours REAL,
-    
-    image_url TEXT,
-    icon_name TEXT,
-    
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    is_active INTEGER DEFAULT 1
-);
-
-CREATE INDEX IF NOT EXISTS idx_courses_subject ON courses(subject);
-CREATE INDEX IF NOT EXISTS idx_courses_grade ON courses(grade);
-CREATE INDEX IF NOT EXISTS idx_courses_exam_type ON courses(exam_type);
-
-CREATE TABLE IF NOT EXISTS lessons (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-    
-    lesson_number INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    topic TEXT NOT NULL,
-    description TEXT,
-    content TEXT,
-    
-    learning_objectives TEXT, -- JSON
-    key_concepts TEXT, -- JSON
-    practice_exercises TEXT, -- JSON
-    homework TEXT, -- JSON
-    
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    
-    UNIQUE (course_id, lesson_number)
-);
-
-CREATE INDEX IF NOT EXISTS idx_lessons_course_id ON lessons(course_id);
-CREATE INDEX IF NOT EXISTS idx_lessons_lesson_number ON lessons(lesson_number);
 
 -- =====================================================
 -- USER LEARNING PROGRESS
 -- =====================================================
 
-CREATE TABLE IF NOT EXISTS user_courses (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-    
-    enrolled_at TEXT DEFAULT (datetime('now')),
-    last_accessed_at TEXT,
-    
-    current_lesson_number INTEGER DEFAULT 1,
-    completed_lessons INTEGER DEFAULT 0,
-    progress_percentage REAL DEFAULT 0 CHECK (progress_percentage >= 0 AND progress_percentage <= 100),
-    
-    total_study_time_minutes INTEGER DEFAULT 0,
-    average_score REAL DEFAULT 0,
-    
-    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'paused', 'dropped')),
-    
-    UNIQUE (user_id, course_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_courses_user_id ON user_courses(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_courses_course_id ON user_courses(course_id);
-CREATE INDEX IF NOT EXISTS idx_user_courses_status ON user_courses(status);
-
-CREATE TABLE IF NOT EXISTS user_lessons (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
-    user_course_id TEXT NOT NULL REFERENCES user_courses(id) ON DELETE CASCADE,
-    
-    status TEXT DEFAULT 'not_started' CHECK (status IN ('not_started', 'in_progress', 'completed', 'reviewed')),
-    started_at TEXT,
-    completed_at TEXT,
-    
-    score REAL,
-    time_spent_minutes INTEGER DEFAULT 0,
-    attempts_count INTEGER DEFAULT 0,
-    
-    homework_submitted INTEGER DEFAULT 0,
-    homework_submitted_at TEXT,
-    homework_content TEXT, -- JSON
-    homework_feedback TEXT, -- JSON
-    
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    
-    UNIQUE (user_id, lesson_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_lessons_user_id ON user_lessons(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_lessons_lesson_id ON user_lessons(lesson_id);
-CREATE INDEX IF NOT EXISTS idx_user_lessons_status ON user_lessons(status);
-
 -- =====================================================
--- LEARNING PLANS
+-- LEARNING PLANS REMOVED - NOW DYNAMIC
 -- =====================================================
-
-CREATE TABLE IF NOT EXISTS learning_plans (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-    
-    plan_data TEXT NOT NULL, -- JSON
-    lessons_structure TEXT NOT NULL, -- JSON
-    
-    generated_at TEXT DEFAULT (datetime('now')),
-    last_updated_at TEXT DEFAULT (datetime('now')),
-    
-    UNIQUE (user_id, course_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_learning_plans_user_id ON learning_plans(user_id);
-CREATE INDEX IF NOT EXISTS idx_learning_plans_course_id ON learning_plans(course_id);
 
 -- =====================================================
 -- CHAT & MESSAGING
@@ -172,8 +54,8 @@ CREATE INDEX IF NOT EXISTS idx_learning_plans_course_id ON learning_plans(course
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    course_id TEXT REFERENCES courses(id) ON DELETE SET NULL,
-    lesson_id TEXT REFERENCES lessons(id) ON DELETE SET NULL,
+    course_id TEXT, -- No foreign key - courses stored in config
+    lesson_id TEXT, -- No foreign key - lessons are dynamic
     
     session_type TEXT DEFAULT 'interactive' CHECK (session_type IN ('lesson', 'interactive', 'voice', 'exam_prep')),
     
@@ -297,39 +179,91 @@ BEGIN
     UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS update_courses_timestamp 
-AFTER UPDATE ON courses
-BEGIN
-    UPDATE courses SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS update_lessons_timestamp 
-AFTER UPDATE ON lessons
-BEGIN
-    UPDATE lessons SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS update_user_courses_timestamp 
-AFTER UPDATE ON user_courses
-BEGIN
-    UPDATE user_courses SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS update_user_lessons_timestamp 
-AFTER UPDATE ON user_lessons
-BEGIN
-    UPDATE user_lessons SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS update_learning_plans_timestamp 
-AFTER UPDATE ON learning_plans
-BEGIN
-    UPDATE learning_plans SET last_updated_at = datetime('now') WHERE id = NEW.id;
-END;
+-- TRIGGERS FOR REMOVED TABLES DELETED
 
 CREATE TRIGGER IF NOT EXISTS update_user_preferences_timestamp 
 AFTER UPDATE ON user_preferences
 BEGIN
     UPDATE user_preferences SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- =====================================================
+-- LESSON SESSIONS REMOVED - NOW USE PROFILES
+-- =====================================================
+
+-- =====================================================
+-- USER STATE (replaces localStorage currentCourse, currentLesson, etc.)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS user_state (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    user_id TEXT UNIQUE NOT NULL,
+    
+    current_course_id TEXT,
+    current_lesson_data TEXT, -- JSON
+    course_info TEXT, -- JSON
+    lesson_index INTEGER DEFAULT 0,
+    
+    -- Other state data
+    personalized_course TEXT, -- JSON
+    selected_course_data TEXT, -- JSON
+    
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- User Library - stores all user's selected courses
+CREATE TABLE IF NOT EXISTS user_library (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    user_id TEXT NOT NULL, -- No foreign key - user may not exist in users table
+
+    course_id TEXT NOT NULL, -- e.g., 'english-11'
+    subject TEXT NOT NULL, -- e.g., 'english'
+    grade INTEGER NOT NULL, -- e.g., 11
+    title TEXT NOT NULL, -- e.g., 'Английский язык для 11 класса'
+    description TEXT,
+
+    added_at TEXT DEFAULT (datetime('now')),
+    last_accessed_at TEXT DEFAULT (datetime('now')),
+
+    UNIQUE(user_id, course_id) -- Prevent duplicate courses
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_library_user_id ON user_library(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_library_course_id ON user_library(course_id);
+
+CREATE INDEX IF NOT EXISTS idx_user_state_user_id ON user_state(user_id);
+
+-- Lesson Assessments - stores LLM evaluations of completed lessons
+CREATE TABLE IF NOT EXISTS lesson_assessments (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    course_id TEXT NOT NULL,
+    lesson_id TEXT, -- Can be null for voice lessons
+    lesson_title TEXT NOT NULL,
+    lesson_topic TEXT,
+    lesson_date TEXT DEFAULT (datetime('now')),
+    duration_minutes INTEGER,
+    grade INTEGER CHECK (grade BETWEEN 2 AND 5), -- Russian 5-point scale
+    llm_feedback TEXT,
+    strengths TEXT, -- JSON array of strengths
+    improvements TEXT, -- JSON array of improvements
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_lesson_assessments_user_id ON lesson_assessments(user_id);
+CREATE INDEX IF NOT EXISTS idx_lesson_assessments_course_id ON lesson_assessments(course_id);
+CREATE INDEX IF NOT EXISTS idx_lesson_assessments_date ON lesson_assessments(lesson_date);
+
+CREATE TRIGGER IF NOT EXISTS update_lesson_assessments_timestamp
+AFTER UPDATE ON lesson_assessments
+BEGIN
+    UPDATE lesson_assessments SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_user_state_timestamp 
+AFTER UPDATE ON user_state
+BEGIN
+    UPDATE user_state SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 

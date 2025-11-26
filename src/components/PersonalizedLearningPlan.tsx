@@ -98,7 +98,7 @@ export const PersonalizedLearningPlan: React.FC<PersonalizedLearningPlanProps> =
         console.warn(`⚠️ Plan data is very large (${sizeInKB}KB), this may cause issues`);
       }
 
-      const response = await fetch('/api/db/learning-plans', {
+      const response = await fetch('/api/learning-plans', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

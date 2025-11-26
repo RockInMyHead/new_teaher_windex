@@ -4,7 +4,7 @@
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' ? `${window.location.origin}/api` : 'http://localhost:1031/api');
+  (typeof window !== 'undefined' ? 'http://localhost:3001/api' : 'http://localhost:3001/api');
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;
@@ -21,17 +21,21 @@ async function apiRequest<T>(
   
   // Build URL with query parameters
   let url = `${API_BASE_URL}${endpoint}`;
+  const searchParams = new URLSearchParams();
   if (params) {
-    const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
       searchParams.append(key, String(value));
     });
-    url += `?${searchParams.toString()}`;
   }
+  // Add timestamp to prevent caching
+  searchParams.append('_t', Date.now().toString());
+  url += `?${searchParams.toString()}`;
   
   // Default headers
   const headers = {
     'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
     ...fetchOptions.headers,
   };
   

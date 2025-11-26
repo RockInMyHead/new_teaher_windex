@@ -20,7 +20,7 @@ export class ChatService {
    * Send educational message with optimized settings for learning
    */
   async sendEducationalMessage(messages: ChatMessage[], maxTokens: number = 2000): Promise<ChatCompletionResponse> {
-    const request = this.createEducationalRequest(messages, 'gpt-4o-mini', maxTokens);
+    const request = this.createEducationalRequest(messages, 'gpt-5.1', maxTokens);
     return this.sendMessage(request);
   }
 
@@ -175,8 +175,8 @@ export class ChatService {
    */
   createMessageRequest(
     messages: ChatMessage[],
-    model: string = 'gpt-4o-mini',
-    maxTokens: number = 2000,
+    model: string = 'gpt-5.1',
+    maxTokens: number = 10000,
     temperature: number = 0.4 // СНИЖЕНА для лучшего качества текста
   ): ChatCompletionRequest {
     return {
@@ -195,8 +195,8 @@ export class ChatService {
    */
   createEducationalRequest(
     messages: ChatMessage[],
-    model: string = 'gpt-4o-mini',
-    maxTokens: number = 2000
+    model: string = 'gpt-5.1',
+    maxTokens: number = 10000
   ): ChatCompletionRequest {
     return {
       model,

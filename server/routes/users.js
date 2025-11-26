@@ -26,7 +26,7 @@ router.get('/:userId', async (req, res) => {
         total_points, level,
         created_at, last_login_at
       FROM users 
-      WHERE id = $1 AND is_active = true`,
+      WHERE id = ? AND is_active = true`,
       [userId]
     );
     
@@ -57,7 +57,7 @@ router.post('/register', async (req, res) => {
     
     // Check if user exists
     const existingUser = await db.query(
-      'SELECT id FROM users WHERE email = $1 OR username = $2',
+      'SELECT id FROM users WHERE email = ? OR username = ?',
       [email, username]
     );
     
@@ -71,7 +71,7 @@ router.post('/register', async (req, res) => {
     // Create user
     const result = await db.query(
       `INSERT INTO users (email, username, password_hash, full_name)
-       VALUES ($1, $2, $3, $4)
+       VALUES (?, ?, ?, ?)
        RETURNING id, email, username, full_name, role, created_at`,
       [email, username, passwordHash, fullName || username]
     );
@@ -80,7 +80,7 @@ router.post('/register', async (req, res) => {
     
     // Create default preferences
     await db.query(
-      'INSERT INTO user_preferences (user_id) VALUES ($1)',
+      'INSERT INTO user_preferences (user_id) VALUES (?)',
       [user.id]
     );
     
@@ -111,7 +111,7 @@ router.post('/login', async (req, res) => {
               current_streak_days, max_streak_days,
               total_points, level
        FROM users 
-       WHERE email = $1 AND is_active = true`,
+       WHERE email = ? AND is_active = true`,
       [email]
     );
     
@@ -129,7 +129,7 @@ router.post('/login', async (req, res) => {
     
     // Update last login
     await db.query(
-      'UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
+      "UPDATE users SET last_login_at = datetime('now') WHERE id = ?",
       [user.id]
     );
     
@@ -155,9 +155,9 @@ router.put('/:userId', async (req, res) => {
     
     const result = await db.query(
       `UPDATE users 
-       SET full_name = COALESCE($1, full_name),
-           avatar_url = COALESCE($2, avatar_url)
-       WHERE id = $3
+       SET full_name = COALESCE(?, full_name),
+           avatar_url = COALESCE(?, avatar_url)
+       WHERE id = ?
        RETURNING id, email, username, full_name, avatar_url`,
       [fullName, avatarUrl, userId]
     );
@@ -192,13 +192,13 @@ router.put('/:userId/stats', async (req, res) => {
     
     const result = await db.query(
       `UPDATE users 
-       SET total_lessons_completed = COALESCE($1, total_lessons_completed),
-           total_study_hours = COALESCE($2, total_study_hours),
-           current_streak_days = COALESCE($3, current_streak_days),
-           max_streak_days = COALESCE($4, max_streak_days),
-           total_points = COALESCE($5, total_points),
-           level = COALESCE($6, level)
-       WHERE id = $7
+       SET total_lessons_completed = COALESCE(?, total_lessons_completed),
+           total_study_hours = COALESCE(?, total_study_hours),
+           current_streak_days = COALESCE(?, current_streak_days),
+           max_streak_days = COALESCE(?, max_streak_days),
+           total_points = COALESCE(?, total_points),
+           level = COALESCE(?, level)
+       WHERE id = ?
        RETURNING total_lessons_completed, total_study_hours, 
                  current_streak_days, max_streak_days, total_points, level`,
       [totalLessonsCompleted, totalStudyHours, currentStreakDays, maxStreakDays, totalPoints, level, userId]
@@ -225,7 +225,7 @@ router.get('/:userId/preferences', async (req, res) => {
     const { userId } = req.params;
     
     const result = await db.query(
-      'SELECT * FROM user_preferences WHERE user_id = $1',
+      'SELECT * FROM user_preferences WHERE user_id = ?',
       [userId]
     );
     
@@ -252,14 +252,14 @@ router.put('/:userId/preferences', async (req, res) => {
     
     const result = await db.query(
       `UPDATE user_preferences 
-       SET theme = COALESCE($1, theme),
-           language = COALESCE($2, language),
-           notifications_enabled = COALESCE($3, notifications_enabled),
-           preferred_lesson_duration = COALESCE($4, preferred_lesson_duration),
-           tts_voice = COALESCE($5, tts_voice),
-           tts_speed = COALESCE($6, tts_speed),
-           other_settings = COALESCE($7, other_settings)
-       WHERE user_id = $8
+       SET theme = COALESCE(?, theme),
+           language = COALESCE(?, language),
+           notifications_enabled = COALESCE(?, notifications_enabled),
+           preferred_lesson_duration = COALESCE(?, preferred_lesson_duration),
+           tts_voice = COALESCE(?, tts_voice),
+           tts_speed = COALESCE(?, tts_speed),
+           other_settings = COALESCE(?, other_settings)
+       WHERE user_id = ?
        RETURNING *`,
       [
         preferences.theme,

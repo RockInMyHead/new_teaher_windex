@@ -273,29 +273,7 @@ export function useCourseProgress(courseId: number, grade: number) {
     });
   }, [courseId, grade]);
 
-  // Load progress from localStorage on mount
-  useEffect(() => {
-    const key = `course_progress_${courseId}_${grade}`;
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setProgress({
-          ...parsed,
-          startedAt: new Date(parsed.startedAt),
-          lastAccessedAt: new Date(parsed.lastAccessedAt)
-        });
-      } catch (err) {
-        console.error('Failed to load progress:', err);
-      }
-    }
-  }, [courseId, grade]);
-
-  // Save progress to localStorage
-  useEffect(() => {
-    const key = `course_progress_${courseId}_${grade}`;
-    localStorage.setItem(key, JSON.stringify(progress));
-  }, [progress, courseId, grade]);
+  // Progress is now managed via sessionService and DB - no localStorage needed
 
   return {
     progress,

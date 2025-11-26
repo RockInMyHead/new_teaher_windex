@@ -5,8 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ArrowRight, ArrowLeft, Loader2 } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { PersonalizedLearningPlan } from '@/components/PersonalizedLearningPlan';
-import { COURSE_PLANS } from '@/utils/coursePlans';
-import { findLessonByTopic } from '@/utils/topicMatcher';
+import { sessionService } from '@/services/sessionService';
 
 interface LastTopicInputProps {
   level: string;
@@ -39,10 +38,9 @@ export const LastTopicInput: React.FC<LastTopicInputProps> = ({
   onSubmit,
   onBack
 }) => {
-  const [topic, setTopic] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showPlan, setShowPlan] = useState(false);
-  const [generatedPlan, setGeneratedPlan] = useState<PersonalizedPlanData | null>(null);
+  // В новой архитектуре этот компонент не используется
+  // Персонализация происходит через профиль ученика в чате
+  return null;
 
   // Функция для получения placeholder текста для каждого курса
   const getPlaceholderText = (courseId: number): string => {
@@ -131,7 +129,8 @@ export const LastTopicInput: React.FC<LastTopicInputProps> = ({
         createdAt: new Date().toISOString()
       };
 
-      localStorage.setItem('personalizedCourse', JSON.stringify(personalizedData));
+      // Save to DB via sessionService
+      sessionService.saveUserState({ personalizedCourse: personalizedData });
       setGeneratedPlan(personalizedData);
 
       // Небольшая задержка для UX
@@ -191,7 +190,8 @@ export const LastTopicInput: React.FC<LastTopicInputProps> = ({
       createdAt: new Date().toISOString()
     };
 
-    localStorage.setItem('personalizedCourse', JSON.stringify(personalizedData));
+    // Save to DB via sessionService
+    sessionService.saveUserState({ personalizedCourse: personalizedData });
     setGeneratedPlan(personalizedData);
 
     // Небольшая задержка для UX

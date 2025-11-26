@@ -114,57 +114,6 @@ class ChatService {
     return api.put(`/chat/messages/${messageId}/tts`, data);
   }
 
-  /**
-   * Save messages to localStorage (for backward compatibility)
-   */
-  saveMessagesToLocalStorage(messages: any[]): void {
-    localStorage.setItem('chatMessages', JSON.stringify(messages));
-  }
-
-  /**
-   * Get messages from localStorage (for backward compatibility)
-   */
-  getMessagesFromLocalStorage(): any[] | null {
-    const data = localStorage.getItem('chatMessages');
-    if (!data) return null;
-    
-    try {
-      return JSON.parse(data);
-    } catch (error) {
-      console.error('Error parsing messages from localStorage:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Clear chat data from localStorage
-   */
-  clearLocalStorage(): void {
-    localStorage.removeItem('chatMessages');
-    localStorage.removeItem('chatHistory');
-    localStorage.removeItem('lessonContext');
-  }
-
-  /**
-   * Get current active session ID from localStorage
-   */
-  getCurrentSessionId(): string | null {
-    return localStorage.getItem('currentChatSessionId');
-  }
-
-  /**
-   * Set current active session ID
-   */
-  setCurrentSessionId(sessionId: string): void {
-    localStorage.setItem('currentChatSessionId', sessionId);
-  }
-
-  /**
-   * Clear current session ID
-   */
-  clearCurrentSessionId(): void {
-    localStorage.removeItem('currentChatSessionId');
-  }
 }
 
 export const chatService = new ChatService();

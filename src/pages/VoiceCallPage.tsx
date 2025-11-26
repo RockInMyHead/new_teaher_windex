@@ -1,9 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft, Mic, Loader2, MicOff, PhoneOff } from 'lucide-react';
 import { HeaderWithHero } from '@/components/Header';
+import { useLearningProfile } from '@/hooks/useLearningProfile';
+import { sessionService } from '@/services/sessionService';
+import { learningProfileService } from '@/services/learningProfileService';
+import { parseCourseId, getFullCourseTitle, getCourseById } from '@/config/courses';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -13,6 +17,28 @@ interface Message {
 
 const VoiceCallPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  
+  // Get course ID from URL params
+  const courseIdFromParams = searchParams.get('course') || '';
+  const userIdFromStorage = sessionService.getUserId();
+
+  // Debug logging
+  console.log('🎯 VoiceCallPage init - courseIdFromParams:', courseIdFromParams, 'userIdFromStorage:', userIdFromStorage);
+
+  // Learning profile hook - loads student profile and LLM context
+  const {
+    profile: learningProfile,
+    llmContext,
+    isLoading: isLoadingProfile,
+    systemPrompt: profileSystemPrompt,
+    analyzeAndUpdateFromLLM,
+    loadLLMContext
+  } = useLearningProfile({
+    userId: userIdFromStorage,
+    courseId: courseIdFromParams,
+    autoLoad: !!courseIdFromParams
+  });
 
   // State
   const [isListening, setIsListening] = useState(false);
@@ -23,6 +49,9 @@ const VoiceCallPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [speechTheses, setSpeechTheses] = useState<string[]>([]);
   const [audioBlocked, setAudioBlocked] = useState(false);
+
+  // Lesson tracking
+  const lessonStartTimeRef = useRef<Date | null>(null);
   
   // Use ref for lesson context to avoid closure issues
   const lessonContextRef = useRef<{
@@ -58,6 +87,15 @@ const VoiceCallPage: React.FC = () => {
   // Media recording refs
   const mediaRecorderRef = useRef<any>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  
+  // TTS Audio ref for cleanup
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  
+  // Profile creation tracking
+  const profileCreationAttemptedRef = useRef<boolean>(false);
+  
+  // Initialization tracking
+  const initializationStartedRef = useRef<boolean>(false);
 
   // Audio detection constants
   const MIN_THRESHOLD = 5;
@@ -92,8 +130,39 @@ const VoiceCallPage: React.FC = () => {
   };
 
   // End lesson and navigate back
-  const endLesson = () => {
+  const endLesson = async () => {
     console.log('📞 Ending lesson');
+
+    // Evaluate lesson if we have enough data
+    if (lessonStartTimeRef.current && messages.length > 1 && userIdFromStorage && courseIdFromParams) {
+      try {
+        console.log('📊 Evaluating lesson...');
+        const lessonTitle = lessonContextRef.current?.title || 'Голосовой урок';
+        const lessonTopic = lessonContextRef.current?.topic || '';
+
+        // Convert messages to conversation format
+        const conversationHistory = messages.map(msg => ({
+          role: msg.role === 'user' ? 'user' : 'assistant',
+          content: msg.content
+        }));
+
+        // Evaluate and save lesson assessment
+        await learningProfileService.evaluateLesson(
+          userIdFromStorage,
+          courseIdFromParams,
+          lessonTitle,
+          lessonTopic,
+          conversationHistory,
+          lessonStartTimeRef.current,
+          new Date()
+        );
+
+        console.log('✅ Lesson evaluation completed');
+      } catch (error) {
+        console.error('❌ Error evaluating lesson:', error);
+      }
+    }
+
     stopListening();
     cleanup();
     setSpeechTheses([]);
@@ -105,8 +174,41 @@ const VoiceCallPage: React.FC = () => {
   };
 
   // Cleanup function
+  // Stop TTS function (called when user starts speaking)
+  const stopTTS = () => {
+    console.log('🔇 Interrupting TTS due to user speech...');
+
+    // Stop HTML Audio TTS
+    if (currentAudioRef.current) {
+      console.log('🔇 Stopping TTS audio...');
+      currentAudioRef.current.pause();
+      currentAudioRef.current.src = '';
+      currentAudioRef.current = null;
+    }
+
+    // Stop browser TTS (Speech Synthesis)
+    if ('speechSynthesis' in window && window.speechSynthesis.speaking) {
+      console.log('🔇 Stopping Speech Synthesis...');
+      window.speechSynthesis.cancel();
+    }
+  };
+
   const cleanup = () => {
     console.log('🧹 Cleanup started');
+    
+    // Stop TTS Audio
+    if (currentAudioRef.current) {
+      console.log('🔇 Stopping TTS audio...');
+      currentAudioRef.current.pause();
+      currentAudioRef.current.src = '';
+      currentAudioRef.current = null;
+    }
+    
+    // Stop browser TTS (Speech Synthesis)
+    if ('speechSynthesis' in window && window.speechSynthesis.speaking) {
+      console.log('🔇 Stopping Speech Synthesis...');
+      window.speechSynthesis.cancel();
+    }
     
     // Stop Web Speech Recognition
     if (recognitionRef.current) {
@@ -267,6 +369,8 @@ const VoiceCallPage: React.FC = () => {
 
       recognition.onstart = () => {
         console.log('🎙️ Web Speech Recognition started');
+        // Interrupt any currently playing TTS when user starts speaking
+        stopTTS();
       };
 
       recognition.onresult = async (event) => {
@@ -295,14 +399,38 @@ const VoiceCallPage: React.FC = () => {
         console.error('❌ Speech recognition error:', event.error);
 
         if (event.error === 'not-allowed') {
-          setError('Доступ к микрофону запрещен');
+          setError('Доступ к микрофону запрещен. Разрешите доступ в настройках браузера.');
+          setIsListening(false);
         } else if (event.error === 'no-speech') {
           console.log('🤫 No speech detected, continuing...');
-          // Continue listening
+          // Continue listening - this is normal
         } else if (event.error === 'network') {
-          setError('Проблема с сетью');
+          console.warn('🌐 Network error, will retry...');
+          setError('Проблема с сетью, пытаемся восстановить...');
+          // Try to restart after a delay
+          setTimeout(() => {
+            if (isActiveRef.current) {
+              console.log('🔄 Retrying speech recognition after network error...');
+              startListening();
+            }
+          }, 2000);
+        } else if (event.error === 'audio-capture') {
+          console.warn('🎤 Audio capture error, restarting...');
+          setError('Проблема с микрофоном, перезапускаем...');
+          // Try to restart listening
+          setTimeout(() => {
+            if (isActiveRef.current) {
+              console.log('🔄 Retrying speech recognition after audio capture error...');
+              startListening();
+            }
+          }, 1000);
+        } else if (event.error === 'not-available') {
+          setError('Распознавание речи недоступно в этом браузере');
+          setIsListening(false);
         } else {
-          setError(`Ошибка распознавания: ${event.error}`);
+          console.error('❌ Unhandled speech recognition error:', event.error);
+          setError(`Ошибка распознавания речи: ${event.error}`);
+          setIsListening(false);
         }
       };
 
@@ -1006,81 +1134,172 @@ const VoiceCallPage: React.FC = () => {
   // Get LLM response using GPT-5.1
   const getLLMResponse = async (userMessage: string): Promise<string> => {
     try {
-      // Build lesson context if available (read from ref to avoid closure issues)
-      const lessonContext = lessonContextRef.current;
-      let lessonContextText = '';
-
-      if (lessonContext) {
-        lessonContextText = `
-
-ТЕКУЩИЙ УРОК:
-Название: "${lessonContext.title}"
-Тема: ${lessonContext.topic}
-Содержание урока: ${lessonContext.description}`;
-      } else {
-        console.warn('⚠️ No lesson context available');
+      // Ensure we have at least basic course context
+      if (!courseIdFromParams) {
+        console.warn('⚠️ No courseId available for LLM response');
+        return 'Извините, не удалось определить курс для урока.';
       }
 
-    // Always use Russian prompt for Julia, regardless of lesson type
-    const systemPrompt = `Ты Юлия - профессиональный педагог с 20-летним стажем. Ведёшь урок по голосовой связи один-на-один.${lessonContextText}
+      // Use current context by default, will be updated if direct load succeeds
+      let effectiveLLMContext = llmContext;
 
-КРИТИЧНО ВАЖНО: СТРОГО ПРИДЕРЖИВАЙСЯ ТЕМЫ УРОКА! НИКОГДА НЕ ОТХОДИ ОТ ЗАДАННОЙ ТЕМЫ. ВСЕ ВОПРОСЫ И ЗАДАНИЯ ДОЛЖНЫ БЫТЬ СВЯЗАНЫ ТОЛЬКО С ТЕМОЙ УРОКА.
+    // Build system prompt like in Chat.tsx
+    const buildSystemPrompt = () => {
+      // Получаем название курса из конфига
+      const { subject, level } = parseCourseId(courseIdFromParams || 'general');
+      const courseTitle = level ? getFullCourseTitle(subject, level) : 'Общий курс';
+      const courseConfig = getCourseById(subject);
 
-ТВОЯ МЕТОДИКА:
-1. Давай только ОДНО задание за раз. Не перегружай ученика.
-2. Объясняй "на пальцах" - просто, понятно, с конкретными примерами из жизни.
-3. Начинай с самого простого, постепенно усложняй.
-4. После каждого ответа ученика - дай обратную связь (похвали или мягко поправь).
-5. Задавай вопросы, чтобы проверить понимание.
-6. Говори кратко (2-3 предложения) - это голосовой урок, не лекция.
+      // Формируем базовый промпт с названием курса
+      const basePrompt = `Ты - Юля, профессиональный школьный учитель с 15-летним стажем.
 
-ВАЖНЫЕ ПРАВИЛА:
-- ВСЕ ЦИФРЫ ПИШИ СЛОВАМИ: вместо "1, 2, 3" пиши "один, два, три"
-- Вместо "5 минут" пиши "пять минут"
-- Вместо "10 слов" пиши "десять слов"
-- Это голосовой урок - числа должны быть понятны при произнесении
-- НИКОГДА НЕ СПРАШИВАЙ ПРО ЯБЛОКИ, ГРУШИ ИЛИ ДРУГИЕ НЕСВЯЗАННЫЕ ТЕМЫ!
+📚 ТВОЙ ТЕКУЩИЙ КУРС: "${courseTitle}"
+${courseConfig?.description ? `📝 О курсе: ${courseConfig.description}` : ''}
 
-СТРУКТУРА УРОКА:
-- Если это первое сообщение: поприветствуй, скажи тему урока, дай ОДНО простое задание для разминки ПО ТЕМЕ УРОКА
-- Далее: реагируй на ответы, хвали прогресс, давай следующее задание по порядку ТОЛЬКО ПО ТЕМЕ УРОКА
-- Если ученик не понял: объясни проще, приведи пример из жизни СВЯЗАННЫЙ С ТЕМОЙ УРОКА
-- ВСЕГДА оставайся в рамках темы урока - это критично важно!
+Твоя главная задача - помогать ученику по курсу "${courseTitle}".
+Ты должна:
+- Отвечать на вопросы ученика по темам этого курса
+- Объяснять материал простым и понятным языком
+- Задавать домашние задания по теме курса
+- Помогать с выполнением домашних заданий
+- Выявлять проблемные темы и работать над ними
 
-История разговора:
-${messages.map(m => `${m.role === 'user' ? 'Ученик' : 'Юлия'}: ${m.content}`).join('\n')}
+Если ученик спрашивает о теме, которая не входит в программу "${courseTitle}",
+объясни, что эта тема изучается на других уровнях, но ты можешь дать базовое объяснение.`;
 
-Ученик: ${userMessage}
+      // Добавляем контекст профиля обучения
+      let profileContext = '';
+      if (effectiveLLMContext?.learningProfile) {
+        const lp = effectiveLLMContext.learningProfile;
 
-Ответь как Юлия (кратко, одно задание, на пальцах). СТРОГО ПРИДЕРЖИВАЙСЯ ТЕМЫ УРОКА!
+        profileContext += '\n\n👤 ПРОФИЛЬ УЧЕНИКА ПО ЭТОМУ КУРСУ:';
 
-ФОРМАТИРУЙ ОТВЕТ С ПОМОЩЬЮ MARKDOWN:
-- Используй ## для заголовков
-- Используй **текст** для выделения важных понятий
-- Используй нумерованные списки 1. 2. 3. для перечислений
-- Используй - для маркированных списков`;
+        if (lp.weakTopics && lp.weakTopics.length > 0) {
+          const unresolvedWeakTopics = lp.weakTopics.filter((t: any) => !t.resolved);
+          if (unresolvedWeakTopics.length > 0) {
+            profileContext += `\n⚠️ ПРОБЛЕМНЫЕ ТЕМЫ (уделяй особое внимание):`;
+            unresolvedWeakTopics.forEach((t: any) => {
+              profileContext += `\n  - ${t.topic}${t.details ? `: ${t.details}` : ''}`;
+            });
+          }
+        }
 
-    console.log('📤 Sending to LLM with lesson context:', lessonContext ? 'YES' : 'NO');
-    console.log('🌍 Julia always speaks Russian');
-    if (lessonContext) {
-      console.log('📖 Lesson:', lessonContext.title, '|', lessonContext.topic);
+        if (lp.strongTopics && lp.strongTopics.length > 0) {
+          profileContext += `\n✅ СИЛЬНЫЕ СТОРОНЫ:`;
+          lp.strongTopics.forEach((t: any) => {
+            profileContext += `\n  - ${t.topic} (${t.masteryLevel}%)`;
+          });
+        }
+
+        if (lp.currentHomework && lp.currentHomeworkStatus === 'pending') {
+          profileContext += `\n📝 ТЕКУЩЕЕ ДОМАШНЕЕ ЗАДАНИЕ: ${lp.currentHomework}`;
+          profileContext += `\n   (Напомни ученику о ДЗ, если он не выполнил)`;
+        }
+
+        if (lp.learningPace) {
+          const paceMap: Record<string, string> = {
+            slow: 'медленный - объясняй подробнее и давай больше примеров',
+            normal: 'нормальный',
+            fast: 'быстрый - можно давать больше материала'
+          };
+          profileContext += `\n📊 Темп обучения: ${paceMap[lp.learningPace] || lp.learningPace}`;
+        }
+
+        // Добавляем заметки учителя
+        if (lp.recentTeacherNotes && lp.recentTeacherNotes.length > 0) {
+          profileContext += `\n📋 ЗАМЕТКИ ИЗ ПРОШЛЫХ УРОКОВ:`;
+          lp.recentTeacherNotes.slice(-3).forEach((note: any) => {
+            profileContext += `\n  - ${note.note}`;
+          });
+        }
+      }
+
+      // Build lesson context if available
+      const lessonContext = lessonContextRef.current;
+      let lessonContextText = '';
+      if (lessonContext) {
+        lessonContextText = `\n📖 ТЕКУЩИЙ УРОК: "${lessonContext.title}" - ${lessonContext.topic}`;
+        lessonContextText += `\nПлан: ${lessonContext.aspects || 'Изучаем тему урока'}`;
+      }
+
+      return `${basePrompt}
+${profileContext}
+${lessonContextText}
+
+🎯 ТВОЙ ПОДХОД К ОБУЧЕНИЮ:
+- Объясняй "на пальцах" - используй простые аналогии из жизни
+- Разбивай сложные темы на понятные шаги
+- Задавай вопросы для проверки понимания
+- Хвали за успехи и мягко указывай на ошибки
+- Если видишь проблему - добавь её в список проблемных тем
+
+УЧЕНИК СКАЗАЛ: "${userMessage}"
+
+Ответь как учитель по курсу "${courseTitle}". Будь дружелюбной, но профессиональной.`;
+    };
+
+    const systemPrompt = buildSystemPrompt();
+
+    // Final check: if we still don't have course context, try to load it synchronously
+    if (!effectiveLLMContext?.course && courseIdFromParams && userIdFromStorage) {
+      console.log('🚨 No course context available, attempting synchronous load...');
+      try {
+        // Try to get context from learning profile service directly
+        const directContext = await learningProfileService.getLLMContext(userIdFromStorage, courseIdFromParams);
+        if (directContext?.course) {
+          console.log('✅ Direct context load successful');
+          // Use the loaded context for this specific call
+          effectiveLLMContext = directContext;
+        }
+      } catch (error) {
+        console.warn('⚠️ Direct context load failed:', error);
+      }
     }
 
-    const response = await fetch('/api/responses', {
+    console.log('📤 Sending to LLM with enhanced context');
+    console.log('📚 Course:', effectiveLLMContext?.course?.title || courseIdFromParams);
+    const currentLessonContext = lessonContextRef.current;
+    if (currentLessonContext) {
+      console.log('📖 Lesson:', currentLessonContext.title, '|', currentLessonContext.topic);
+    }
+    console.log('👤 Profile loaded:', !!effectiveLLMContext?.learningProfile);
+    console.log('📋 Full LLM context:', {
+      hasCourse: !!effectiveLLMContext?.course,
+      hasProfile: !!effectiveLLMContext?.learningProfile,
+      hasSystemInstructions: !!effectiveLLMContext?.systemInstructions
+    });
+
+    // Prepare messages array with conversation history
+    const conversationMessages = messages.map(m => ({
+      role: m.role,
+      content: m.content
+    }));
+
+    const messagesForAPI = [
+      { role: 'system', content: systemPrompt },
+      ...conversationMessages,
+      { role: 'user', content: userMessage }
+    ];
+
+    const response = await fetch('/api/chat/completions', {
         method: 'POST',
       headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+        messages: messagesForAPI,
         model: 'gpt-5.1',
-        input: systemPrompt
+        max_completion_tokens: 200,
+        temperature: 0.7
         })
       });
 
       if (!response.ok) {
-      throw new Error('LLM failed');
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error('❌ Voice chat LLM request failed:', response.status, errorText);
+      throw new Error('Voice chat LLM failed');
     }
 
       const result = await response.json();
-      return result.output_text;
+    return result.choices[0].message.content;
     } catch (error) {
       console.error('❌ Error in getLLMResponse:', error);
       console.error('❌ Error message:', error.message);
@@ -1113,9 +1332,13 @@ ${messages.map(m => `${m.role === 'user' ? 'Ученик' : 'Юлия'}: ${m.con
 
       return new Promise((resolve, reject) => {
       const audio = new Audio(audioUrl);
+      
+      // Store audio ref for cleanup
+      currentAudioRef.current = audio;
 
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null; // Clear ref when done
           console.log('✅ TTS complete');
           resolve();
       };
@@ -1123,6 +1346,7 @@ ${messages.map(m => `${m.role === 'user' ? 'Ученик' : 'Юлия'}: ${m.con
       audio.onerror = (error) => {
           console.error('❌ TTS playback error:', error);
         URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null; // Clear ref on error
           reject(error);
       };
 
@@ -1204,50 +1428,164 @@ ${messages.map(m => `${m.role === 'user' ? 'Ученик' : 'Юлия'}: ${m.con
     }
   };
 
-  // Load lesson context from localStorage - ONCE at mount
+  // Load lesson context from DB - reload when courseId changes
   useEffect(() => {
-    // Skip if already loaded
-    if (lessonContextRef.current) {
-      console.log('✅ Lesson context already loaded, skipping');
-      return;
+    // Reset lesson context when courseId changes
+    if (lessonContextRef.current && !courseIdFromParams) {
+      lessonContextRef.current = null;
     }
 
-    try {
-      const storedLesson = localStorage.getItem('currentLesson');
-      console.log('🔍 Checking localStorage for currentLesson...');
-      
-      if (storedLesson) {
-        const lessonData = JSON.parse(storedLesson);
+    const loadLessonContext = async () => {
+      try {
+        console.log('🔍 Checking user state for currentLesson...');
+        const userState = await sessionService.getUserState();
+
+        console.log('📦 Full user state:', userState);
+        console.log('🎯 Expected courseId:', courseIdFromParams);
+        console.log('📋 Stored courseId:', userState?.currentCourseId);
+
+        // Check if userState contains data for the correct course
+        const courseMatches = userState?.currentCourseId === courseIdFromParams || 
+                               userState?.currentCourseId === String(courseIdFromParams);
+
+        if (!courseMatches && userState?.currentCourseId) {
+          console.log('⚠️ Course mismatch! UserState has data for:', userState?.currentCourseId, 'but we need:', courseIdFromParams);
+          console.log('🧹 Clearing old lesson context data...');
+          // Clear old data to force fresh lesson loading
+          await sessionService.clearCourseState();
+          console.log('✅ Old data cleared');
+          // Don't return - continue to load correct lesson
+        }
+
+        // If we have matching course data, use it
+        if (courseMatches && userState?.currentLessonData) {
+          const lessonData = userState.currentLessonData;
+          console.log('📦 Raw lesson data:', lessonData);
+
+          // Build context from currentLessonData (same structure as Chat.tsx uses)
         const context = {
           title: lessonData.title || 'Урок',
           topic: lessonData.topic || '',
-          description: lessonData.description || lessonData.aspects || lessonData.content || ''
+            // Use aspects as the main description (this is what Chat.tsx uses for lesson content)
+            description: lessonData.aspects || lessonData.description || lessonData.content || ''
         };
-        
+
         lessonContextRef.current = context;
-        console.log('📚 Lesson context loaded ONCE:');
+        console.log('📚 Lesson context loaded from userState:');
         console.log('  Title:', context.title);
         console.log('  Topic:', context.topic);
-        console.log('  Description:', context.description?.substring(0, 100) + '...');
+          console.log('  Description:', context.description?.substring(0, 200) + '...');
+        } else if (courseIdFromParams) {
+          // If no matching data, try to load course from API
+          console.log('📡 No matching lesson data, loading course from API...');
+          try {
+            const courseService = (await import('@/services/courseService')).default;
+            const courseData = await courseService.getCourse(courseIdFromParams);
+            
+            if (courseData && courseData.currentLesson) {
+              const context = {
+                title: courseData.currentLesson.title || 'Урок',
+                topic: courseData.currentLesson.topic || '',
+                description: courseData.currentLesson.aspects || courseData.currentLesson.description || courseData.currentLesson.content || ''
+              };
+              
+              lessonContextRef.current = context;
+              console.log('📚 Lesson context loaded from API:');
+              console.log('  Title:', context.title);
+              console.log('  Topic:', context.topic);
+            } else {
+              console.warn('⚠️ No lesson data in course from API');
+            }
+          } catch (error) {
+            console.error('❌ Error loading course from API:', error);
+          }
       } else {
-        console.warn('⚠️ No lesson context found in localStorage');
+          console.warn('⚠️ No lesson context found and no courseId to load from');
       }
     } catch (error) {
       console.error('❌ Error loading lesson context:', error);
     }
-  }, []);
+    };
+    loadLessonContext();
+  }, [courseIdFromParams]);
 
   // Mount effect
   useEffect(() => {
+    // Prevent multiple initializations
+    if (initializationStartedRef.current) {
+      console.log('⚠️ Initialization already started, skipping...');
+      return;
+    }
+
+    initializationStartedRef.current = true;
     console.log('🎓 VoiceCallPage mounted');
     console.log('🎤 Web Speech API supported:', isWebSpeechSupported());
+    console.log('📋 Course ID from params:', courseIdFromParams);
+    console.log('👤 User ID:', userIdFromStorage);
+
+    // Force load LLM context at startup to ensure it's available
+    const forceLoadContext = async () => {
+      if (userIdFromStorage && courseIdFromParams) {
+        console.log('🔄 Force loading LLM context at startup...');
+        try {
+          await loadLLMContext();
+          console.log('✅ LLM context force-loaded at startup');
+        } catch (error) {
+          console.warn('⚠️ Failed to force-load LLM context:', error);
+        }
+      }
+    };
 
     // Send welcome message if chat is empty and lesson context is loaded
     const initializeChat = async () => {
-      // Wait a bit for lesson context to load
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // First, ensure context is loaded
+      await forceLoadContext();
+      console.log('🎓 VoiceCallPage initializing...');
+      console.log('📋 courseIdFromParams:', courseIdFromParams);
+      console.log('👤 userIdFromStorage:', userIdFromStorage);
+      console.log('🔄 isLoadingProfile:', isLoadingProfile);
+      console.log('📚 lessonContextRef.current:', !!lessonContextRef.current);
+      console.log('🤖 llmContext:', !!llmContext);
 
-      if (messages.length === 0 && lessonContextRef.current) {
+      // Wait for learning profile and lesson context to load (extended timeout)
+      console.log('⏳ Waiting for profile and lesson context...');
+      let attempts = 0;
+      const maxAttempts = 50; // Increased from 20 to 50 (5 seconds total)
+
+      // For voice lessons, we only need LLM context and course data, not lesson context
+      while (attempts < maxAttempts && (isLoadingProfile || !llmContext || !llmContext?.course)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+        if (attempts % 10 === 0) { // Log every 1 second instead of every 0.5
+          console.log(`⏳ Still waiting... (attempt ${attempts}/${maxAttempts}) - Loading: ${isLoadingProfile}, LLM Context: ${!!llmContext}, Course: ${!!llmContext?.course}, Profile: ${!!llmContext?.learningProfile}`);
+        }
+      }
+
+      console.log('✅ Wait complete - Loading:', isLoadingProfile, 'Lesson:', !!lessonContextRef.current, 'LLM Context:', !!llmContext);
+
+      // If no learning profile loaded (but LLM context exists), try to create profile manually (only once)
+      if (llmContext && !llmContext.learningProfile && userIdFromStorage && courseIdFromParams && !isLoadingProfile && !profileCreationAttemptedRef.current) {
+        profileCreationAttemptedRef.current = true; // Mark as attempted
+        console.log('📋 LLM context loaded but no learning profile found, creating profile manually...');
+        try {
+          // Create profile using the same method as chat
+          await analyzeAndUpdateFromLLM('', 'system', `Начало голосового урока по курсу ${courseIdFromParams}`);
+
+          // Wait for profile creation
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          console.log('✅ Profile created, reloading LLM context...');
+          // Reload LLM context instead of reloading page
+          await loadLLMContext();
+          console.log('✅ LLM context reloaded');
+
+        } catch (error) {
+          console.warn('⚠️ Failed to create profile:', error);
+          profileCreationAttemptedRef.current = false; // Reset on error to allow retry
+        }
+      }
+
+      if (messages.length === 0) {
         console.log('💬 Chat is empty, sending welcome message...');
         await sendWelcomeMessage();
       }
@@ -1260,6 +1598,8 @@ ${messages.map(m => `${m.role === 'user' ? 'Ученик' : 'Юлия'}: ${m.con
     return () => {
       console.log('🎓 VoiceCallPage unmounting');
       cleanup();
+      initializationStartedRef.current = false; // Reset for next mount
+      profileCreationAttemptedRef.current = false; // Reset for next mount
     };
   }, []);
 

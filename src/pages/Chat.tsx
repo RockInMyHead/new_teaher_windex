@@ -13,10 +13,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Brain, Send, User, MessageCircle, Volume2, VolumeX, CheckCircle, X, BookOpen, Target, ArrowLeft, Phone, PhoneOff } from 'lucide-react';
 import { OpenAITTS, isTTSAvailable } from '@/lib/openaiTTS';
+
+// Обновляем время взаимодействия при действиях пользователя
+const updateUserInteraction = () => OpenAITTS.updateUserInteraction();
 import { VoiceComm, VoiceUtils } from '@/lib/voiceComm';
-import { COURSE_TEST_QUESTIONS, TestQuestion, COURSE_PLANS } from '@/utils/coursePlans';
+import { getFullCourseTitle, parseCourseId, getCourseById } from '@/config/courses';
 import { AssessmentResults } from '@/components/AssessmentResults';
-import { createPersonalizedCourseData } from '@/utils/assessmentAnalyzer';
 import { ChatContainer } from '@/components/Chat';
 import LessonDisplay from '@/components/LessonDisplay';
 // Stub for lesson context manager
@@ -49,6 +51,9 @@ class LessonContextManager {
   }
 }
 import { HeaderWithHero } from '@/components/Header';
+import { useLearningProfile } from '@/hooks/useLearningProfile';
+import { learningProfileService } from '@/services/learningProfileService';
+import { sessionService } from '@/services/sessionService';
 
 
 
@@ -62,16 +67,41 @@ interface Message {
   ttsPlayed?: boolean;
 }
 
-interface IntroTestQuestion {
-  question: string;
-  options: string[];
-}
 
 const Chat = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const chatContainerRef = useRef<any>(null);
   const isNavigatingRef = useRef(false);
+
+  // Get course and user IDs from URL params for learning profile
+  const courseIdFromParamsRaw = searchParams.get('course');
+  // Ensure courseId is valid (not empty, not NaN, not null, not undefined)
+  const courseIdFromParams = (courseIdFromParamsRaw && 
+    courseIdFromParamsRaw !== 'NaN' && 
+    courseIdFromParamsRaw !== 'null' && 
+    courseIdFromParamsRaw !== 'undefined' &&
+    courseIdFromParamsRaw.trim() !== '') ? courseIdFromParamsRaw : '';
+  const userIdFromStorage = sessionService.getUserId();
+  
+  // Learning profile hook - loads student profile and LLM context
+  const {
+    profile: learningProfile,
+    llmContext,
+    isLoading: isLoadingProfile,
+    systemPrompt: profileSystemPrompt,
+    welcomeMessage: profileWelcomeMessage,
+    analyzeAndUpdateFromLLM,
+    addWeakTopic,
+    addStrongTopic,
+    assignHomework,
+    addTeacherNote,
+    loadLLMContext
+  } = useLearningProfile({
+    userId: userIdFromStorage,
+    courseId: courseIdFromParams,
+    autoLoad: !!courseIdFromParams
+  });
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -84,12 +114,6 @@ const Chat = () => {
   const [totalSentences, setTotalSentences] = useState<number>(0);
   const [isGeneratingTTS, setIsGeneratingTTS] = useState(false);
 
-  // Assessment testing states
-  const [isAssessmentMode, setIsAssessmentMode] = useState(false);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [assessmentQuestions, setAssessmentQuestions] = useState<TestQuestion[]>([]);
-  const [assessmentResults, setAssessmentResults] = useState<{question: string, userAnswer: string, correctAnswer: string, isCorrect: boolean}[]>([]);
-  const [assessmentCompleted, setAssessmentCompleted] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<number | null>(null);
   const [personalizedCourseData, setPersonalizedCourseData] = useState<any>(null);
@@ -240,31 +264,10 @@ const Chat = () => {
   const [lessonGenerationComplete, setLessonGenerationComplete] = useState(false);
   const [textMessage, setTextMessage] = useState('');
   const [isProcessingTextMessage, setIsProcessingTextMessage] = useState(false);
-  const [savedLessons, setSavedLessons] = useState<any[]>([]);
-  const [showSavedLessons, setShowSavedLessons] = useState(false);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
 
-  // Handle URL parameters for loading lesson and starting voice call
-  useEffect(() => {
-    const loadLessonParam = searchParams.get('loadLesson');
-    const voiceCallParam = searchParams.get('voiceCall');
-
-    if (loadLessonParam) {
-      const lessonId = parseInt(loadLessonParam);
-      console.log('📖 Loading lesson from URL:', lessonId);
-      
-      // Load the lesson
-      loadSavedLesson(lessonId);
-
-      // If voiceCall parameter is present, open video call
-      if (voiceCallParam === 'true') {
-        console.log('📞 Opening voice call from URL');
-        setTimeout(() => {
-          setShowVideoCall(true);
-        }, 500);
-      }
-    }
-  }, [searchParams]);
 
   const ttsContinueRef = useRef<boolean>(true);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -353,7 +356,7 @@ const Chat = () => {
       if (lastMessage.role === 'assistant' && !lastMessage.ttsPlayed && !OpenAITTS.isPlaying()) {
         // Mark as played to avoid re-playing
         lastMessage.ttsPlayed = true;
-        speakTextBySentences(lastMessage.content, lastMessage.id); // Use sentence-by-sentence speaking
+        OpenAITTS.speak(lastMessage.content, { voice: 'nova', speed: 1.0 }); // Use OpenAI TTS
       }
     }
   }, [messages, isTtsEnabled]);
@@ -361,21 +364,47 @@ const Chat = () => {
 
   // Load course data from URL parameters
   const loadCourseDataFromParams = async (courseId: string, lessonId: string) => {
+    // Validate courseId before making API request
+    if (!courseId || 
+        courseId === 'NaN' || 
+        courseId === 'null' || 
+        courseId === 'undefined' ||
+        courseId.trim() === '') {
+      console.warn('⚠️ Invalid courseId, skipping API request:', courseId);
+      return;
+    }
+
     try {
       console.log('🔍 Loading course data for:', { courseId, lessonId });
 
       // Try to get course data from API
       const response = await fetch(`${window.location.origin}/api/courses/${courseId}`);
       if (response.ok) {
-        const courseData = await response.json();
-        console.log('✅ Course data loaded from API:', courseData);
+        const apiResponse = await response.json();
+        console.log('✅ Course data loaded from API:', apiResponse);
+        
+        // Handle both response formats: {course: {...}} or {...}
+        const courseData = apiResponse.course || apiResponse;
+        console.log('📦 Extracted course data:', courseData);
+
+        // Parse lesson number from lessonId (format: lesson_courseId_number)
+        let lessonNumber = 1;
+        const lessonMatch = lessonId.match(/lesson_.*_(\d+)$/);
+        if (lessonMatch) {
+          lessonNumber = parseInt(lessonMatch[1]);
+        }
+
+        // Find the specific lesson
+        const lesson = courseData.lessons?.find((l: any) => l.lesson_number === lessonNumber) || courseData.lessons?.[0];
 
         // Create lesson data structure
         const lessonData = {
-          id: lessonId,
-          title: courseData.currentLesson?.title || 'Текущий урок',
-          topic: courseData.currentLesson?.topic || 'Тема урока',
-          content: courseData.currentLesson?.content || 'Контент урока'
+          id: lesson?.id || lessonId,
+          number: lesson?.lesson_number || lessonNumber,
+          title: lesson?.title || 'Текущий урок',
+          topic: lesson?.topic || 'Тема урока',
+          content: lesson?.content || 'Контент урока',
+          grade: courseData.grade
         };
 
         // Set course context
@@ -391,15 +420,12 @@ const Chat = () => {
 
         setCurrentLesson(lessonData);
 
-        // Try to get lesson session data
-        const userId = 'default_user'; // TODO: get from auth
-        const lessonSessionKey = `lesson_session_${courseId}`;
-        const sessionDataStr = localStorage.getItem(lessonSessionKey);
-
-        if (sessionDataStr) {
-          const sessionData = JSON.parse(sessionDataStr);
+        // Try to get lesson session data from DB
+        const loadSessionData = async () => {
+          const sessionData = await sessionService.getLessonSession(courseId);
+          if (sessionData) {
           setLessonSessionData(sessionData);
-          console.log('✅ Lesson session data loaded:', sessionData);
+            console.log('✅ Lesson session data loaded from DB:', sessionData);
         } else {
           // Create default session data
           const defaultSession = {
@@ -409,46 +435,50 @@ const Chat = () => {
             lastLessonDate: new Date().toISOString()
           };
           setLessonSessionData(defaultSession);
-          console.log('📝 Created default lesson session');
+            await sessionService.saveLessonSession(courseId, defaultSession);
+            console.log('📝 Created default lesson session in DB');
         }
+        };
+        loadSessionData();
 
+      } else if (response.status === 404) {
+        console.warn('⚠️ Course not found, falling back to user state');
+        // Course not found, use fallback
+        loadFromUserStateFallback();
       } else {
-        console.error('❌ Failed to load course data from API');
-        // Fallback to localStorage
-        loadFromLocalStorageFallback();
+        console.error('❌ Failed to load course data from API, status:', response.status);
+        // Fallback to user state
+        loadFromUserStateFallback();
       }
     } catch (error) {
       console.error('❌ Error loading course data from params:', error);
-      // Fallback to localStorage
-      loadFromLocalStorageFallback();
+      // Fallback to user state
+      loadFromUserStateFallback();
     }
   };
 
-  // Fallback function to load from localStorage
-  const loadFromLocalStorageFallback = () => {
-    const storedLesson = localStorage.getItem('currentLesson');
-    const storedCourseInfo = localStorage.getItem('courseInfo');
+  // Fallback function to load from user state in DB
+  const loadFromUserStateFallback = async () => {
+    const userState = await sessionService.getUserState();
 
-    if (storedLesson) {
+    if (userState?.currentLessonData) {
       try {
-        const lessonData = JSON.parse(storedLesson);
-        setCurrentLesson(lessonData);
-        console.log('Loaded lesson data for lesson mode:', lessonData);
+        setCurrentLesson(userState.currentLessonData);
+        console.log('Loaded lesson data from user state:', userState.currentLessonData);
       } catch (error) {
-        console.error('Failed to parse lesson data:', error);
+        console.error('Failed to load lesson data:', error);
       }
     }
 
-    if (storedCourseInfo) {
+    if (userState?.courseInfo) {
       try {
-        const courseInfo = JSON.parse(storedCourseInfo);
         // Create minimal personalizedCourseData structure for lesson mode
         setPersonalizedCourseData({
-          courseInfo: courseInfo,
-          lessons: [JSON.parse(storedLesson || '{}')]
+          courseInfo: userState.courseInfo,
+          lessons: userState.currentLessonData ? [userState.currentLessonData] : []
         });
       } catch (error) {
-        console.error('Failed to parse course info:', error);
+        console.error('Failed to load course info:', error);
       }
     }
   };
@@ -476,53 +506,67 @@ const Chat = () => {
     const isLessonModeParam = mode === 'lesson';
     setIsLessonMode(isLessonModeParam);
 
-    // Load current lesson data from localStorage or URL parameters
+    // Load current lesson data from DB or URL parameters
     if (isLessonModeParam) {
       const courseParam = searchParams.get('course');
       const lessonParam = searchParams.get('lesson');
 
       console.log('📚 Lesson mode detected:', {
         courseParam,
-        lessonParam,
-        hasStoredData: !!localStorage.getItem('currentCourse')
+        lessonParam
       });
 
       // If we have URL parameters, try to load course data
-      if (courseParam && lessonParam) {
+      // Validate that courseParam is not invalid values
+      const isValidCourseParam = courseParam && 
+        courseParam !== 'NaN' && 
+        courseParam !== 'null' && 
+        courseParam !== 'undefined' &&
+        courseParam.trim() !== '';
+      
+      if (isValidCourseParam && lessonParam) {
         console.log('🔗 Loading course data from URL parameters...');
         loadCourseDataFromParams(courseParam, lessonParam);
-      }
-      const storedLesson = localStorage.getItem('currentLesson');
-      const storedCourseInfo = localStorage.getItem('courseInfo');
+      } else {
+        if (courseParam && !isValidCourseParam) {
+          console.warn('⚠️ Invalid courseParam in URL:', courseParam, '- falling back to user state');
+        }
+        // Fallback: try to load from user state in DB
+        const loadFromUserState = async () => {
+          const userState = await sessionService.getUserState();
+          if (userState?.currentCourseId) {
+            console.log('📦 Found course data in user state:', userState);
+            
+            // Set course context
+            if (userState.courseInfo) {
+            const personalizedData = {
+                courseInfo: userState.courseInfo,
+                lessons: userState.currentLessonData ? [userState.currentLessonData] : []
+            };
+            setPersonalizedCourseData(personalizedData);
+            console.log('✅ Set personalizedCourseData:', personalizedData);
+            }
 
-      if (storedLesson) {
-        try {
-          const lessonData = JSON.parse(storedLesson);
-          setCurrentLesson(lessonData);
-          console.log('Loaded lesson data for lesson mode:', lessonData);
-        } catch (error) {
-          console.error('Failed to parse lesson data:', error);
+            // Load lesson session data from DB
+            const sessionData = await sessionService.getLessonSession(userState.currentCourseId);
+            if (sessionData) {
+              setLessonSessionData(sessionData);
+              console.log('✅ Loaded lesson session data from DB:', sessionData);
+              }
+
+            if (userState.currentLessonData) {
+              setCurrentLesson(userState.currentLessonData);
+              console.log('Loaded lesson data for lesson mode:', userState.currentLessonData);
         }
       }
-
-      if (storedCourseInfo) {
-        try {
-          const courseInfo = JSON.parse(storedCourseInfo);
-          // Create minimal personalizedCourseData structure for lesson mode
-          setPersonalizedCourseData({
-            courseInfo: courseInfo,
-            lessons: [JSON.parse(storedLesson || '{}')]
-          });
-        } catch (error) {
-          console.error('Failed to parse course info:', error);
-        }
+        };
+        loadFromUserState();
       }
 
       // Auto-start lesson generation if requested
-      if (auto === 'true' && storedLesson) {
+      if (auto === 'true' && currentLesson) {
         console.log('🚀 Auto-starting lesson generation...');
         console.log('Current lesson state:', currentLesson);
-        console.log('Stored lesson data:', JSON.parse(storedLesson));
 
         // Set a flag to auto-generate when lesson is loaded
         setTimeout(() => {
@@ -533,8 +577,7 @@ const Chat = () => {
         console.log('ℹ️ Auto-start conditions not met:', {
           auto: auto,
           autoIsTrue: auto === 'true',
-          storedLesson: !!storedLesson,
-          storedLessonContent: storedLesson ? 'present' : 'missing'
+          currentLesson: !!currentLesson
         });
       }
     }
@@ -545,52 +588,39 @@ const Chat = () => {
       console.log('Regular chat mode - checking for lesson context');
       console.log('Current URL:', window.location.href);
 
-      // Check if there's lesson session data first
-      const storedCourseData = localStorage.getItem('currentCourse');
+      // Check if there's lesson session data in DB
+      const loadCourseContextForChat = async () => {
+        const userState = await sessionService.getUserState();
       
-      if (storedCourseData) {
-        try {
-          const courseData = JSON.parse(storedCourseData);
-          console.log('📦 Found stored course data:', courseData);
-          console.log('🔍 Course ID from localStorage:', courseData.id);
+        if (userState?.currentCourseId) {
+          console.log('📦 Found course data in user state:', userState);
           
-          // Get lesson session data
-          const lessonSessionKey = `lesson_session_${courseData.id}`;
-          const lessonSessionDataStr = localStorage.getItem(lessonSessionKey);
+          // Get lesson session data from DB
+          const sessionData = await sessionService.getLessonSession(userState.currentCourseId);
           
-          console.log('🔑 Lesson session key:', lessonSessionKey);
-          console.log('📦 Lesson session data exists:', !!lessonSessionDataStr);
+          console.log('📦 Lesson session data exists:', !!sessionData);
 
           // Only load course data if we have lesson session data (meaning this is a lesson chat)
-          if (lessonSessionDataStr) {
-            const parsedLessonSessionData = JSON.parse(lessonSessionDataStr);
+          if (sessionData) {
             console.log('✅ Valid lesson chat detected');
-            console.log('📚 Course title:', courseData.title);
-            console.log('📖 Lesson number:', parsedLessonSessionData.lessonNumber);
+            console.log('📚 Course title:', userState.courseInfo?.title);
+            console.log('📖 Lesson number:', sessionData.lessonNumber);
 
             // Clear any existing course data first to prevent old data from persisting
             setPersonalizedCourseData(null);
             setLessonSessionData(null);
 
           // Set course context for the chat (but DON'T set currentLesson to avoid triggering lesson generation)
+            if (userState.courseInfo) {
           setPersonalizedCourseData({
-            courseInfo: {
-                id: courseData.id,
-              title: courseData.title,
-              grade: courseData.grade,
-              description: courseData.description
-            },
+                courseInfo: userState.courseInfo,
             lessons: []
           });
+            }
 
-          // Set lesson session data if available
-          if (courseData.sessionData) {
-            setLessonSessionData(courseData.sessionData);
-            console.log('Loaded lesson session data:', courseData.sessionData);
-            } else if (parsedLessonSessionData) {
-              setLessonSessionData(parsedLessonSessionData);
-              console.log('Loaded parsed lesson session data:', parsedLessonSessionData);
-          }
+            // Set lesson session data
+            setLessonSessionData(sessionData);
+            console.log('Loaded lesson session data:', sessionData);
 
           // DON'T set currentLesson in chat mode - we only need course context, not lesson mode
           // This prevents automatic lesson generation from triggering
@@ -598,33 +628,78 @@ const Chat = () => {
           } else {
             console.log('⚠️ No lesson session data - treating as general chat');
             // No lesson session means general chat
-            setCurrentLesson(null);
-            setPersonalizedCourseData(null);
-            setLessonSessionData(null);
-          }
-        } catch (error) {
-          console.error('❌ Failed to parse course data for chat:', error);
-          // Clear any corrupted data
           setCurrentLesson(null);
           setPersonalizedCourseData(null);
           setLessonSessionData(null);
         }
       } else {
-        console.log('📭 No course data found for chat session');
-        // Clear any existing lesson context
+          console.log('⚠️ No course data in user state - treating as general chat');
+          // Clear any existing data
         setCurrentLesson(null);
         setPersonalizedCourseData(null);
         setLessonSessionData(null);
       }
+      };
+      loadCourseContextForChat();
     }
   }, [searchParams]);
 
   // Generate welcome message when course data is loaded (only for lesson chats)
+  // OR for general chat without course (universal teacher)
   useEffect(() => {
+    console.log('🔍 Welcome message useEffect check:', {
+      hasPersonalizedCourseData: !!personalizedCourseData,
+      hasLessonSessionData: !!lessonSessionData,
+      messagesCount: messages.length,
+      isLessonMode,
+      courseTitle: personalizedCourseData?.courseInfo?.title,
+      timestamp: new Date().toISOString()
+    });
+
+    // Check if we have a general welcome message that should be replaced
+    const hasGeneralWelcome = messages.length === 1 && 
+      messages[0]?.role === 'assistant' && 
+      (messages[0]?.content?.includes('Я Юлия, твой универсальный ИИ-учитель') ||
+       messages[0]?.content?.includes('Я универсальный учитель по любым предметам'));
+
+    // For general chat at /chat without course - show universal teacher welcome
+    // Only if we're definitively NOT in lesson mode (not just URL param, but also no course data loading)
+    // Never show universal welcome if we're in lesson mode, even if data hasn't loaded yet
+    if (!isLessonMode && !personalizedCourseData && !lessonSessionData && messages.length === 0) {
+      console.log('👋 General chat mode - adding universal teacher welcome');
+      const universalWelcome: Message = {
+        id: `welcome-universal-${Date.now()}`,
+        role: 'assistant',
+        content: `Привет! 👋 Я Юлия, твой универсальный ИИ-учитель.
+
+Я могу помочь тебе с любым школьным предметом: математика, русский язык, английский, физика, химия, биология, история и многое другое!
+
+Что ты хочешь изучить сегодня? Просто напиши тему или вопрос, и мы начнём!`,
+        timestamp: new Date()
+      };
+      setMessages([universalWelcome]);
+      return;
+    }
+
     // Only generate welcome message if we have lesson session data (meaning this is a lesson chat)
     // For regular chat at /chat, no welcome message should be generated
-    if (personalizedCourseData && lessonSessionData && messages.length === 0 && !isLessonMode) {
-      console.log('👋 Generating welcome message for lesson chat with course:', personalizedCourseData.courseInfo.title);
+    // Also generate if we have general welcome that needs to be replaced
+    if (personalizedCourseData && lessonSessionData && isLessonMode && (messages.length === 0 || hasGeneralWelcome)) {
+      console.log('✅ Conditions met for lesson welcome generation:', {
+        hasPersonalizedCourseData: !!personalizedCourseData,
+        hasLessonSessionData: !!lessonSessionData,
+        isLessonMode,
+        messagesLength: messages.length,
+        hasGeneralWelcome
+      });
+      // Remove general welcome if it exists
+      if (hasGeneralWelcome) {
+        console.log('🗑️ Removing general welcome message to replace with lesson welcome');
+        setMessages([]);
+        return; // Will trigger useEffect again with empty messages
+      }
+
+      console.log('👋 Generating welcome message for lesson chat with course:', personalizedCourseData.courseInfo?.title || 'Unknown');
 
       // Generate welcome message using AI
       const generateWelcomeMessage = async () => {
@@ -633,6 +708,12 @@ const Chat = () => {
 
           const welcomePrompt = `ВАША РОЛЬ:
 Вы - учитель этого курса. Ученик пришёл к вам на индивидуальное занятие${lessonSessionData ? ` (урок ${lessonSessionData.lessonNumber})` : ''}.
+
+ВАЖНАЯ ИНФОРМАЦИЯ ДЛЯ УЧЕНИКА:
+- Это интерактивное обучение с ИИ-учителем в текстовом формате
+- Одновременно доступно голосовое обучение с Юлией - естественное общение и голосовые ответы
+- Вы можете переключаться между текстовым и голосовым режимом в любое время
+- Задавайте вопросы, получайте подробные объяснения мгновенно
 
 ПРИ ПЕРВОМ СООБЩЕНИИ:
 1. Поприветствуйте ученика: "Добро пожаловать на урок по ${personalizedCourseData.courseInfo.title}!"
@@ -674,15 +755,33 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
                 { role: 'system', content: welcomePrompt },
                 { role: 'user', content: 'Привет! Я готов начать урок.' }
               ],
-              model: 'gpt-4o-mini',
+              model: 'gpt-5.1',
               temperature: 0.7,
-              max_tokens: 500
+              max_completion_tokens: 200
             })
           });
 
           if (response.ok) {
             const data = await response.json();
-            const welcomeMessage = data.choices[0].message.content;
+            console.log('📥 Welcome message API response:', data);
+            let welcomeMessage = data.choices?.[0]?.message?.content;
+
+            // Check for empty response and use fallback
+            if (!welcomeMessage || welcomeMessage.trim() === '') {
+              console.warn('⚠️ Empty welcome message from API, using fallback');
+              welcomeMessage = `Добро пожаловать на урок по ${personalizedCourseData.courseInfo.title}!
+
+Я Юлия, ваш учитель по предмету "${personalizedCourseData.courseInfo.title}" для ${personalizedCourseData.courseInfo.grade} класса.
+
+Скажите, пожалуйста:
+- Что конкретно вы хотите изучить на этом уроке?
+- Есть ли у вас вопросы по предмету?
+- Нужна ли помощь с домашним заданием?
+
+Я помогу вам разобраться в сложных темах простыми словами!`;
+            }
+
+            console.log('✅ Welcome message content:', welcomeMessage.substring(0, 100) + '...');
 
             // Add welcome message to chat
             const welcomeMessageObj: Message = {
@@ -703,7 +802,25 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
               console.log('✅ Welcome message added to local state (fallback)');
             }
           } else {
-            console.error('❌ Failed to generate welcome message');
+            console.error('❌ Failed to generate welcome message, status:', response.status);
+            // Use fallback on error
+            const fallbackMessage = `Добро пожаловать на урок по ${personalizedCourseData.courseInfo.title}!
+
+Я Юлия, ваш учитель. Что бы вы хотели изучить сегодня?`;
+
+            const welcomeMessageObj: Message = {
+              id: `welcome-fallback-${Date.now()}`,
+              role: 'assistant',
+              content: fallbackMessage,
+              timestamp: new Date(),
+              ttsPlayed: false
+            };
+
+            if (chatContainerRef.current?.addMessage) {
+              chatContainerRef.current.addMessage(welcomeMessageObj);
+            } else {
+              setMessages([welcomeMessageObj]);
+            }
           }
         } catch (error) {
           console.error('❌ Error generating welcome message:', error);
@@ -714,12 +831,17 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
 
       generateWelcomeMessage();
     }
-  }, [personalizedCourseData, lessonSessionData, messages.length, isLessonMode]);
+  }, [personalizedCourseData, lessonSessionData, messages, isLessonMode]);
 
   // Generate general welcome message for plain chat (no course context)
   useEffect(() => {
+    // Check mode from URL params directly (not from state, which updates asynchronously)
+    const modeFromParams = searchParams.get('mode');
+    const isLessonModeFromParams = modeFromParams === 'lesson';
+    
     // If this is regular chat with no course data and no messages, show general welcome
-    if (!personalizedCourseData && !lessonSessionData && messages.length === 0 && !isLessonMode) {
+    // IMPORTANT: Don't show general welcome if we're in lesson mode (even if data is still loading)
+    if (!personalizedCourseData && !lessonSessionData && messages.length === 0 && !isLessonModeFromParams && !isLessonMode) {
       console.log('👋 Generating general welcome message for plain chat');
 
       const generalWelcomeMessage: Message = {
@@ -741,7 +863,7 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
       setMessages([generalWelcomeMessage]);
       console.log('✅ General welcome message added to plain chat');
     }
-  }, [personalizedCourseData, lessonSessionData, messages.length, isLessonMode]);
+  }, [personalizedCourseData, lessonSessionData, messages.length, isLessonMode, searchParams]);
 
   // Auto-generate lesson when both conditions are met
   useEffect(() => {
@@ -816,10 +938,10 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o',
+          model: 'gpt-5.1',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.7,
-          max_tokens: 4000
+          max_completion_tokens: 4000
         })
       });
 
@@ -1231,56 +1353,99 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
           const lastStudentMsg = historyRef.current[historyRef.current.length - 1];
           const textToSend = lastStudentMsg?.role === 'student' ? lastStudentMsg.text : text;
 
-          const systemPrompt = `Ты - Юля, профессиональный школьный учитель с 15-летним стажем. Твоя главная задача - ВЕСТИ УРОК ПО ПЛАНУ и объяснять все "на пальцах" - доступно и понятно, чтобы каждый ученик мог легко понять материал.
+          // Build system prompt with learning profile context
+          const buildSystemPrompt = () => {
+            // Получаем название курса из конфига
+            const { subject, level } = parseCourseId(courseIdFromParams || 'general');
+            const courseTitle = level ? getFullCourseTitle(subject, level) : 'Общий курс';
+            const courseConfig = getCourseById(subject);
+            
+            // Формируем базовый промпт с названием курса
+            const basePrompt = `Ты - Юля, профессиональный школьный учитель с 15-летним стажем.
 
-ТВОЙ ПРОФЕССИОНАЛЬНЫЙ ПОДХОД К ОБУЧЕНИЮ:
+📚 ТВОЙ ТЕКУЩИЙ КУРС: "${courseTitle}"
+${courseConfig?.description ? `📝 О курсе: ${courseConfig.description}` : ''}
 
-🎯 ТЫ ВЕДЕШЬ УРОК: Рассказывай теорию, объясняй темы простым языком, задавай вопросы для проверки понимания.
-📚 СТРУКТУРА УРОКА: Сначала объясняй материал "на пальцах" с примерами, потом спрашивай у ученика.
-🚫 НЕ ЖДИ, ПОКА УЧЕНИК ЗАДАСТ ВОПРОС: Ты ведешь урок, ты задаешь вопросы.
-📝 ПЕРЕХОДИ К СЛЕДУЮЩЕМУ: После объяснения и проверки понимания, переходи к следующему пункту плана.
+Твоя главная задача - помогать ученику по курсу "${courseTitle}". 
+Ты должна:
+- Отвечать на вопросы ученика по темам этого курса
+- Объяснять материал простым и понятным языком
+- Задавать домашние задания по теме курса
+- Помогать с выполнением домашних заданий
+- Выявлять проблемные темы и работать над ними
 
-КАК ОБЪЯСНЯТЬ "НА ПАЛЬЦАХ" (ТВОЯ ГЛАВНАЯ СУПЕРСИЛА):
-- Используй простые аналогии из повседневной жизни (например: "Представь, что это как...")
-- Разбивай сложные концепции на маленькие, понятные шаги
-- Приводи конкретные примеры, которые ученик может легко представить
-- Избегай сложных терминов без объяснения - если нужно использовать термин, сначала объясни его простыми словами
-- Связывай новое с уже известным ученику
-- Показывай, как знания применяются в реальной жизни
+Если ученик спрашивает о теме, которая не входит в программу "${courseTitle}", 
+объясни, что эта тема изучается на других уровнях, но ты можешь дать базовое объяснение.`;
+            
+            // Добавляем контекст профиля обучения
+            let profileContext = '';
+            if (llmContext?.learningProfile) {
+              const lp = llmContext.learningProfile;
+              
+              profileContext += '\n\n👤 ПРОФИЛЬ УЧЕНИКА ПО ЭТОМУ КУРСУ:';
+              
+              if (lp.weakTopics && lp.weakTopics.length > 0) {
+                const unresolvedWeakTopics = lp.weakTopics.filter(t => !t.resolved);
+                if (unresolvedWeakTopics.length > 0) {
+                  profileContext += `\n⚠️ ПРОБЛЕМНЫЕ ТЕМЫ (уделяй особое внимание):`;
+                  unresolvedWeakTopics.forEach(t => {
+                    profileContext += `\n  - ${t.topic}${t.details ? `: ${t.details}` : ''}`;
+                  });
+                }
+              }
+              
+              if (lp.strongTopics && lp.strongTopics.length > 0) {
+                profileContext += `\n✅ СИЛЬНЫЕ СТОРОНЫ:`;
+                lp.strongTopics.forEach(t => {
+                  profileContext += `\n  - ${t.topic} (${t.masteryLevel}%)`;
+                });
+              }
+              
+              if (lp.currentHomework && lp.currentHomeworkStatus === 'pending') {
+                profileContext += `\n📝 ТЕКУЩЕЕ ДОМАШНЕЕ ЗАДАНИЕ: ${lp.currentHomework}`;
+                profileContext += `\n   (Напомни ученику о ДЗ, если он не выполнил)`;
+              }
+              
+              if (lp.learningPace) {
+                const paceMap: Record<string, string> = {
+                  slow: 'медленный - объясняй подробнее и давай больше примеров',
+                  normal: 'нормальный',
+                  fast: 'быстрый - можно давать больше материала'
+                };
+                profileContext += `\n📊 Темп обучения: ${paceMap[lp.learningPace] || lp.learningPace}`;
+              }
 
-ПРАВИЛА ПРОВЕДЕНИЯ УРОКА:
-1. РАССКАЗЫВАЙ ТЕОРИЮ: Объясняй темы из плана урока простым, понятным языком "на пальцах", с примерами из жизни.
-2. ЗАДАВАЙ ВОПРОСЫ: После объяснения спрашивай у ученика, понял ли он.
-3. ПРОВЕРЯЙ ОТВЕТЫ: Анализируй, правильно ли ответил ученик.
-4. ЕСЛИ ОТВЕТ НЕВЕРНЫЙ:
-   - Скажи: "Не совсем так" или "Давай подумаем еще раз" - мягко и поддерживающе.
-   - Объясни ошибку и правильный ответ "на пальцах", используя простой пример.
-   - Переспроси, чтобы проверить понимание.
-5. ЕСЛИ ОТВЕТ НЕПОНЯТЕН:
-   - Попробуй найти ОМОФОНЫ: "Грипп грибы" -> "Гриб грибы" (по контексту).
-   - Если совсем непонятно - объясни по-другому, используя другой пример или аналогию.
-6. ЕСЛИ ОТВЕТ ПРАВИЛЬНЫЙ: Кратко похвали и переходи к следующему.
-7. СЛЕДУЮЩИЙ ШАГ: После проверки всегда переходи к следующему пункту плана.
+              // Добавляем заметки учителя
+              if (lp.recentTeacherNotes && lp.recentTeacherNotes.length > 0) {
+                profileContext += `\n📋 ЗАМЕТКИ ИЗ ПРОШЛЫХ УРОКОВ:`;
+                lp.recentTeacherNotes.slice(-3).forEach(note => {
+                  profileContext += `\n  - ${note.note}`;
+                });
+              }
+            }
+            
+            return `${basePrompt}
+${profileContext}
 
-ПРАВИЛА ДЛЯ ТЕКСТА В РЕЧЬ (TTS):
-- Расставляй УДАРЕНИЯ в сложных словах знаком + перед ударной гласной (например: "м+ама", "г+ород").
-- Для омографов (зам+ок/з+амок) обязательно ставь ударение по контексту.
+🎯 ТВОЙ ПОДХОД К ОБУЧЕНИЮ:
+- Объясняй "на пальцах" - используй простые аналогии из жизни
+- Разбивай сложные темы на понятные шаги
+- Задавай вопросы для проверки понимания
+- Хвали за успехи и мягко указывай на ошибки
+- Если видишь проблему - добавь её в список проблемных тем
 
-ПЛАН ТЕКУЩЕГО УРОКА:
-${currentLesson?.aspects || 'Изучаем основы географии, формы Земли, карты и глобусы'}
+${currentLesson ? `📖 ТЕКУЩИЙ УРОК: "${currentLesson.title}" - ${currentLesson.topic}
+План: ${currentLesson.aspects || 'Изучаем тему урока'}` : ''}
 
-ТЕКУЩИЙ УРОК: "${currentLesson?.title || 'Урок географии'}" (${currentLesson?.topic || 'Формы Земли'})
 КОНТЕКСТ РАЗГОВОРА:
 ${context}
 
 УЧЕНИК СКАЗАЛ: "${textToSend}"
 
-ИНСТРУКЦИЯ ДЛЯ ОТВЕТА:
-1. Если ученик ответил на твой вопрос: Оцени правильность ответа (учитывая омофоны).
-2. Если ученик спросил что-то: Ответь, но верни к плану урока.
-3. Всегда заканчивай объяснением материала или вопросом для проверки понимания.
-4. Переходи к следующему пункту плана, когда ученик понял предыдущий.
-`;
+Ответь как учитель по курсу "${courseTitle}". Будь дружелюбной, но профессиональной.`;
+          };
+          
+          const systemPrompt = buildSystemPrompt();
 
           console.log('⏱️ [TIMING] T+' + (Date.now() - startTime) + 'ms: Prompt prepared, starting API call');
 
@@ -1292,9 +1457,9 @@ ${context}
               { role: 'system', content: systemPrompt },
               { role: 'user', content: `Ученик только что сказал: "${textToSend}". Продолжи урок.` }
               ],
-              model: 'gpt-4o',
+              model: 'gpt-5.1',
               temperature: 0.7,
-              max_tokens: 300
+              max_completion_tokens: 300
             }),
             signal: controller.signal
           });
@@ -1311,15 +1476,28 @@ ${context}
             if (controller.signal.aborted) return;
 
             setConversationHistory(prev => [...prev, { role: 'teacher', text: teacherResponse }]);
+            
+            // 🎯 Analyze LLM response and update learning profile
+            // Only analyze if we have valid courseId and userId
+            const isValidCourseId = courseIdFromParams && 
+              courseIdFromParams !== 'NaN' && 
+              courseIdFromParams !== 'null' && 
+              courseIdFromParams !== 'undefined' &&
+              courseIdFromParams.trim() !== '';
+            if (isValidCourseId && userIdFromStorage) {
+              analyzeAndUpdateFromLLM(teacherResponse, textToSend).catch(err => {
+                console.error('Failed to update learning profile:', err);
+              });
+            }
+            
             await OpenAITTS.speak(teacherResponse, {
               voice: 'nova',
-              speed: 1.0,
-              onEnd: () => {
+              speed: 1.0
+            });
+            // Start listening after TTS completes
                 setTimeout(() => {
                   VoiceComm.startListening();
               }, 1000);
-            }
-            });
           }
         } catch (error) {
             const err = error as Error;
@@ -1391,7 +1569,7 @@ ${context}
             { role: 'system', content: systemPrompt },
                 { role: 'user', content: prompt }
               ],
-              model: 'gpt-4o',
+              model: 'gpt-5.1',
               temperature: 0.7,
           max_tokens: 300
             })
@@ -1487,7 +1665,7 @@ ${context}
               content: initialMessage
             }
               ],
-              model: 'gpt-4o',
+              model: 'gpt-5.1',
           temperature: 0.7,
           max_tokens: 300
             })
@@ -1536,13 +1714,11 @@ ${context}
       setIsLessonSpeaking(true);
 
       // Speak the greeting
+      console.log('🎤 Greeting TTS started');
       await OpenAITTS.speak(greeting, {
         voice: 'nova',
-        speed: 1.0,
-        onStart: () => {
-          console.log('🎤 Greeting TTS started');
-        },
-        onEnd: async () => {
+        speed: 1.0
+      });
           console.log('✅ Greeting TTS ended, starting voice recognition');
         setIsLessonSpeaking(false);
 
@@ -1552,12 +1728,6 @@ ${context}
           } catch (error) {
             console.error('❌ Failed to start voice recognition after greeting:', error);
           }
-        },
-        onError: (error) => {
-          console.error('❌ Greeting TTS error:', error);
-          setIsLessonSpeaking(false);
-        }
-      });
     } catch (error) {
       console.error('❌ Failed to speak greeting:', error);
       setIsLessonSpeaking(false);
@@ -1696,6 +1866,12 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
         messages: [
             { role: 'system', content: `Ты - Юля, профессиональный школьный учитель. Твоя главная цель - УЧИТЬ, объясняя все "на пальцах" - доступно и понятно.
 
+ИНФОРМАЦИЯ О ДОСТУПНЫХ РЕЖИМАХ ОБУЧЕНИЯ:
+- Это голосовое обучение с Юлией - естественное общение и голосовые ответы
+- Одновременно доступно текстовое обучение с ИИ-учителем - подробные объяснения и мгновенные ответы
+- Ученик может переключаться между голосовым и текстовым режимом в любое время
+- Говорите естественно, получайте живые ответы и объяснения
+
 ТВОЙ ПРОФЕССИОНАЛЬНЫЙ ПОДХОД:
 1. Строго соблюдай тему урока: "${currentLesson?.title || 'Урок географии'}" (${currentLesson?.topic || 'Формы Земли'}). Вопросы не по теме - откладывай.
 2. Объясняй все "на пальцах": используй простые аналогии, примеры из жизни, разбивай сложное на простые шаги.
@@ -1705,7 +1881,7 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
 6. Всегда используй простой, понятный язык - как будто объясняешь другу.` },
             { role: 'user', content: prompt }
         ],
-          model: 'gpt-4o',
+          model: 'gpt-5.1',
           temperature: 0.7,
           max_tokens: 300
         })
@@ -1755,7 +1931,12 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
         if (!isWaitingForStudentAnswer && currentNoteIndex + 2 < lessonNotes.length) {
           console.log('▶️ Continuing lesson after text response');
           setTimeout(async () => {
-            await speakLessonNotes(lessonNotes.slice(currentNoteIndex + 2), currentNoteIndex + 2);
+            // Speak remaining lesson notes
+            const remainingNotes = lessonNotes.slice(currentNoteIndex + 2);
+            for (const note of remainingNotes) {
+              await OpenAITTS.speak(note, { voice: 'nova', speed: 1.0 });
+            }
+            setCurrentNoteIndex(lessonNotes.length - 1);
           }, 1000);
         }
       }
@@ -1766,139 +1947,6 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
     }
   };
 
-  // Load saved lessons
-  const loadSavedLessons = async () => {
-    try {
-      const response = await fetch('/api/generated-lessons?limit=20');
-      if (response.ok) {
-        const data = await response.json();
-        setSavedLessons(data.lessons || []);
-        console.log('📚 Loaded saved lessons:', data.lessons?.length);
-      }
-    } catch (error) {
-      console.error('❌ Error loading saved lessons:', error);
-    }
-  };
-
-  // Save current text-based lesson
-  const saveCurrentLesson = async () => {
-    try {
-      if (!lessonNotes.length || !conversationHistory.length) {
-        alert('Нет данных для сохранения. Начните урок и пообщайтесь с учителем.');
-        return;
-      }
-
-      const response = await fetch('/api/generated-lessons', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          course_name: currentLesson?.courseName || 'General',
-          lesson_title: currentLesson?.title || 'Text Lesson',
-          lesson_topic: currentLesson?.topic || '',
-          lesson_number: currentLesson?.number || null,
-          lesson_notes: lessonNotes,
-          generation_prompt: `Text-based lesson with conversation history`,
-          conversation_history: conversationHistory,
-          interaction_type: 'text',
-          is_template: false
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('💾 Text lesson saved with ID:', data.lesson_id);
-        alert('Урок сохранен! Теперь вы можете загрузить его из "Сохраненные уроки"');
-      } else {
-        throw new Error('Failed to save lesson');
-      }
-    } catch (error) {
-      console.error('❌ Error saving current lesson:', error);
-      alert('Ошибка при сохранении урока');
-    }
-  };
-
-  // Delete saved lesson
-  const deleteSavedLesson = async (lessonId: number) => {
-    try {
-      const response = await fetch(`/api/generated-lessons/${lessonId}`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        // Remove from local state
-        setSavedLessons(prev => prev.filter(lesson => lesson.id !== lessonId));
-        console.log('🗑️ Deleted saved lesson:', lessonId);
-      } else {
-        throw new Error('Failed to delete lesson');
-      }
-    } catch (error) {
-      console.error('❌ Error deleting saved lesson:', error);
-      alert('Ошибка при удалении урока');
-    }
-  };
-
-  // Load specific saved lesson
-  const loadSavedLesson = async (lessonId: number) => {
-    try {
-      const response = await fetch(`/api/generated-lessons/${lessonId}`);
-      if (response.ok) {
-        const data = await response.json();
-        const lesson = data.lesson;
-
-        console.log('📖 Loaded saved lesson:', lesson.lesson_title, 'Type:', lesson.interaction_type);
-
-        if (lesson.interaction_type === 'text' && lesson.conversation_history) {
-          // Текстовое общение - загрузить историю чата и конспект
-          console.log('💬 Loading text-based lesson with conversation history');
-
-          setLessonNotes(lesson.lesson_notes);
-          setConversationHistory(JSON.parse(lesson.conversation_history));
-          setCurrentNoteIndex(lesson.lesson_notes.length - 1); // Начать с последней заметки
-          setLessonGenerationComplete(true);
-
-          // Clear voice-related state
-          setIsWaitingForStudentAnswer(false);
-          setCurrentTeacherQuestion('');
-
-          // Показать сообщение о загрузке
-          setTimeout(() => {
-            alert(`Урок "${lesson.lesson_title}" загружен с историей переписки. Продолжайте общение в чате.`);
-          }, 100);
-
-        } else {
-          // Голосовое общение - напомнить на чем закончили
-          console.log('🎤 Loading voice-based lesson, reminding about last state');
-
-          setLessonNotes(lesson.lesson_notes);
-          setCurrentNoteIndex(0);
-          setLessonGenerationComplete(true);
-
-          // Clear any existing state
-          setIsWaitingForStudentAnswer(false);
-          setCurrentTeacherQuestion('');
-          setConversationHistory([]);
-
-          // Напомнить на чем закончили через TTS
-          setTimeout(async () => {
-            try {
-              const lastNote = lesson.lesson_notes[lesson.lesson_notes.length - 1] || 'Мы закончили урок.';
-              const reminder = `Привет! Это Юля. Напоминаю, на чем мы остановились в уроке "${lesson.lesson_title}": ${lastNote.substring(0, 100)}... Продолжим урок?`;
-
-              await OpenAITTS.speak(reminder, {});
-              console.log('🎤 Reminded about lesson state');
-            } catch (error) {
-              console.error('❌ Failed to remind about lesson state:', error);
-              alert(`Урок "${lesson.lesson_title}" загружен. Мы остановились на последней теме урока.`);
-            }
-          }, 500);
-        }
-
-        setShowSavedLessons(false);
-      }
-    } catch (error) {
-      console.error('❌ Error loading saved lesson:', error);
-    }
-  };
 
   // Handle video call with voice transcription and lesson
   const handleCall = async () => {
@@ -1921,8 +1969,8 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
         console.log('🔊 Activating audio context...');
 
         // Try Web Audio API first
-        if (typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined') {
-          const AudioContextClass = AudioContext || webkitAudioContext;
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (typeof AudioContextClass !== 'undefined') {
           const audioContext = new AudioContextClass();
           if (audioContext.state === 'suspended') {
             await audioContext.resume();
@@ -1958,33 +2006,6 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
         setIsGeneratingLesson(false);
         console.log('✅ Greeting ready, count:', notes?.length);
 
-        // Save the generated lesson
-        try {
-          const saveResponse = await fetch('/api/generated-lessons', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              course_name: currentLesson?.courseName || 'General',
-              lesson_title: currentLesson?.title || 'Generated Lesson',
-              lesson_topic: currentLesson?.topic || '',
-              lesson_number: currentLesson?.number || null,
-              lesson_notes: notes,
-              generation_prompt: 'Simple greeting',
-              conversation_history: conversationHistory,
-              interaction_type: 'voice',
-              is_template: false
-            })
-          });
-
-          if (saveResponse.ok) {
-            const saveData = await saveResponse.json();
-            console.log('💾 Generated lesson saved with ID:', saveData.lesson_id);
-          } else {
-            console.warn('⚠️ Failed to save generated lesson:', await saveResponse.text());
-          }
-        } catch (saveError) {
-          console.warn('⚠️ Error saving generated lesson:', saveError);
-        }
 
         // Start the conversation with greeting after generation completes
         console.log('🎓 Starting conversation with greeting...');
@@ -2068,8 +2089,8 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
         if (match && match[1]) {
           const homework = match[1].trim();
           
-          // Save homework to session data
-          const lessonSessionKey = `lesson_session_${personalizedCourseData.courseInfo.id || 'default'}`;
+          // Save homework to session data in DB
+          const courseId = personalizedCourseData.courseInfo.id || 'default';
           const updatedSessionData = {
             ...lessonSessionData,
             homeworks: [
@@ -2083,9 +2104,10 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
             ]
           };
           
-          localStorage.setItem(lessonSessionKey, JSON.stringify(updatedSessionData));
+          // Save to DB asynchronously
+          sessionService.saveLessonSession(courseId, updatedSessionData);
           setLessonSessionData(updatedSessionData);
-          console.log('📝 Saved homework:', homework);
+          console.log('📝 Saved homework to DB:', homework);
           break;
         }
       }
@@ -2134,25 +2156,6 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
                     )}
                   </Button>
 
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="flex-1 sm:flex-none text-lg px-8 py-4 border-2 border-green-500/50 hover:border-green-500 hover:bg-green-50 hover:text-green-700 transition-all duration-300 gap-3 font-semibold"
-                    onClick={saveCurrentLesson}
-                  >
-                    Сохранить урок
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="flex-1 sm:flex-none text-lg px-8 py-4 border-2 border-blue-500/50 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-all duration-300 gap-3 font-semibold"
-                    onClick={() => {
-                      loadSavedLessons();
-                      setShowSavedLessons(true);
-                    }}
-                  >
-                    Сохраненные уроки
-                  </Button>
                 </div>
               )}
 
@@ -2196,9 +2199,17 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
             {false && isLessonMode && lessonStarted && lessonPlan && lessonContent && (
               <LessonDisplay
                 stepTitle={lessonPlan.steps[currentLessonStep]?.title || 'Урок'}
+                stepNumber={currentLessonStep + 1}
+                totalSteps={lessonPlan.steps?.length || 1}
+                content={lessonContent}
                 structuredContent={currentLessonSections}
                 duration={lessonPlan.steps[currentLessonStep]?.duration || '5'}
-                onNext={waitingForAnswer ? undefined : nextSection}
+                onNext={waitingForAnswer ? undefined : () => {
+                  const nextSectionIndex = currentSectionIndex + 1;
+                  if (nextSectionIndex < currentLessonSections.length) {
+                    setCurrentSectionIndex(nextSectionIndex);
+                  }
+                }}
                 isGenerating={isGeneratingContent}
                 currentTask={currentSectionTask}
                 waitingForAnswer={waitingForAnswer}
@@ -2244,8 +2255,7 @@ ${conversationHistory.slice(-3).map(h => `${h.role === 'teacher' ? 'Юля' : '�
             )}
 
             {/* Chat Interface */}
-            {/* Chat Container - hidden in lesson mode */}
-            {!isLessonMode && (
+            {/* Chat Container - always shown for both regular and lesson mode */}
             <ChatContainer
                 ref={chatContainerRef}
               initialSystemPrompt={personalizedCourseData && personalizedCourseData.courseInfo ? 
@@ -2264,7 +2274,43 @@ ${lessonSessionData.lessonNumber > 1 && lessonSessionData.homeworks && lessonSes
 ` : ''}
 
 ВАША РОЛЬ:
-Вы - учитель этого курса. Ученик пришёл к вам на индивидуальное занятие${lessonSessionData ? ` (урок ${lessonSessionData.lessonNumber})` : ''}.
+Вы - профессиональный учитель предмета "${personalizedCourseData.courseInfo.title}" для учеников ${personalizedCourseData.courseInfo.grade} класса. Ваша задача - проводить полноценные, подробные уроки, где каждый момент объясняется скрупулезно и понятно.
+
+ВАЖНЫЕ ПРАВИЛА ПРЕПОДАВАНИЯ:
+
+1. ДЛИТЕЛЬНОСТЬ УРОКА:
+   - Урок должен продолжаться минимум 15-20 сообщений (обменов)
+   - Каждый урок должен подробно разобрать тему от основ до сложных аспектов
+   - Не заканчивайте урок преждевременно - продолжайте объяснять до тех пор, пока ученик не поймет тему полностью
+
+2. СТРУКТУРА ОТВЕТОВ:
+   - ДАВАЙТЕ ПОДРОБНЫЕ ОБЪЯСНЕНИЯ: минимум 3-5 предложений на каждый аспект темы
+   - ПРИВОДИТЕ МНОГО ПРИМЕРОВ: минимум 2-3 примера из реальной жизни на каждое правило
+   - РАЗБИРАЙТЕ ТЕМУ ПО ЧАСТЯМ: объясните сначала базовые понятия, потом правила, потом исключения
+   - ЗАДАВАЙТЕ ВОПРОСЫ ПОСТЕПЕННО: сначала простые вопросы для проверки понимания, потом более сложные
+
+3. МЕТОДИКА ОБУЧЕНИЯ:
+   - Используйте аналогии из повседневной жизни
+   - Приводите примеры из фильмов, книг, спорта, природы
+   - Объясняйте "почему" и "зачем" для каждого правила
+   - Показывайте, как правило применяется в разных ситуациях
+   - Уделяйте внимание исключениям и нюансам
+
+4. ИНТЕРАКТИВНОСТЬ:
+   - После каждого объяснения спрашивайте, понятно ли ученику
+   - Просите ученика привести свои примеры
+   - Проверяйте понимание через вопросы
+   - Хвалите за правильные ответы и поощряйте самостоятельное мышление
+
+5. ПОДРОБНОСТЬ ОБЪЯСНЕНИЙ:
+   - Для грамматики: объясните правило → приведите примеры → покажите исключения → дайте упражнения
+   - Для математики: объясните теорему → докажите → решите задачу пошагово → дайте аналогичные задачи
+   - Для истории: объясните события → назовите причины и последствия → приведите факты и даты → обсудите значение
+
+6. ТЕМП ОБУЧЕНИЯ:
+   - Не торопитесь - лучше объяснить меньше, но очень подробно
+   - Повторяйте важные моменты в разных формулировках
+   - Возвращайтесь к пройденному материалу для закрепления
 
 ПРИ ПЕРВОМ СООБЩЕНИИ:
 1. Поприветствуйте ученика: "Добро пожаловать на урок по ${personalizedCourseData.courseInfo.title}!"
@@ -2274,27 +2320,23 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 && lessonSessionData.h
 ${!lessonSessionData || lessonSessionData.lessonNumber === 1 ? `4. Предложите помощь с домашним заданием, объяснением темы или подготовкой к контрольной` : ''}
 
 ДОМАШНИЕ ЗАДАНИЯ:
-- В конце урока (примерно после 30-40 минут обсуждения или когда тема хорошо разобрана) дайте ученику домашнее задание
-- Домашнее задание должно быть по теме урока
-- Формулируйте четко: "Домашнее задание: [конкретное задание]"
+- Давайте домашнее задание ТОЛЬКО после полного разбора темы (не раньше 15-20 сообщений)
+- Домашнее задание должно закреплять весь изученный материал
+- Объясните, как выполнять задание и зачем оно нужно
 - Запомните это домашнее задание - на следующем уроке вы ОБЯЗАТЕЛЬНО должны его проверить!
 
-ОСОБЕННОСТИ ВАШЕГО СТИЛЯ:
-- Объясняйте сложное простыми словами, как если бы разговаривали с учеником ${personalizedCourseData.courseInfo.grade} класса
-- Используйте примеры из реальной жизни и аналогии
-- Разбивайте информацию на логические блоки
-- Задавайте наводящие вопросы для проверки понимания
-- Будьте терпеливы, поддерживающи и мотивирующи
-- Адаптируйте объяснения под уровень ученика
-- Поощряйте самостоятельное мышление
-- Хвалите за правильные ответы и старания
+ВАШ СТИЛЬ:
+- Дружелюбный и мотивирующий
+- Терпеливый и понимающий
+- Поощряющий самостоятельность
+- Адаптирующий объяснения под уровень ученика
 
 ПОМНИТЕ:
+- Качество важнее количества. Лучше подробно объяснить одну тему, чем поверхностно пройти несколько.
 - Вы учитель по предмету "${personalizedCourseData.courseInfo.title}", поэтому все объяснения должны быть в контексте этого предмета
 - Это урок ${lessonSessionData ? `номер ${lessonSessionData.lessonNumber}` : ''}
 ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛЬНО начните с проверки домашнего задания!' : ''}
-- В конце урока дайте домашнее задание
-- Спрашивайте, что конкретно нужно изучить, чтобы помочь максимально эффективно`
+                `
                 : 
                 `Вы - Юлия, профессиональный педагог и эксперт в образовании. 
 
@@ -2315,91 +2357,20 @@ ${lessonSessionData && lessonSessionData.lessonNumber > 1 ? '- ОБЯЗАТЕЛ�
               maxMessages={100}
               onChatStart={() => console.log('Chat started')}
               onChatEnd={() => console.log('Chat ended')}
+              isLessonMode={isLessonMode}
+              courseId={personalizedCourseData?.courseInfo?.id || 
+                (courseIdFromParams && 
+                 courseIdFromParams !== 'NaN' && 
+                 courseIdFromParams !== 'null' && 
+                 courseIdFromParams !== 'undefined' &&
+                 courseIdFromParams.trim() !== '' ? courseIdFromParams : undefined) || 
+                undefined}
             />
-            )}
 
 
             {/* Saved Lessons */}
-      {/* Saved Lessons Modal */}
-      {showSavedLessons && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[80vh] overflow-hidden">
-            <div className="p-3 border-b">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold">Сохраненные уроки</h2>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowSavedLessons(false)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  ✕
-                </Button>
-              </div>
-            </div>
 
-            <div className="p-3 overflow-y-auto max-h-[60vh]">
-              {savedLessons.length === 0 ? (
-                <div className="text-center py-4">
-                  <p className="text-muted-foreground">У вас пока нет сохраненных уроков.</p>
-                  <p className="text-sm text-muted-foreground mt-2">
-                          Завершите урок и нажмите "Сохранить урок" чтобы сохранить его для последующего использования.
-                  </p>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                        {savedLessons.map((lesson) => (
-                          <div key={lesson.id} className="border border-border rounded-lg p-3 hover:bg-muted/50 transition-colors">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-lg">{lesson.lesson_title}</h3>
-                                <p className="text-muted-foreground text-sm mt-1">
-                                  {lesson.course_name} • {lesson.interaction_type === 'voice' ? '🎤 Голосовой урок' : '💬 Текстовый урок'}
-                                </p>
-                                <p className="text-muted-foreground text-xs mt-2">
-                                  Создан: {new Date(lesson.created_at).toLocaleString('ru-RU')}
-                                </p>
-                                {lesson.lesson_topic && (
-                                  <p className="text-muted-foreground text-sm mt-2">
-                                    Тема: {lesson.lesson_topic}
-                                  </p>
-                                )}
-                          </div>
-                        <div className="flex gap-2 ml-4">
-                          <Button
-                                  variant="outline"
-                            size="sm"
-                                  onClick={() => {
-                                    window.location.href = `/lesson/${lesson.id}`;
-                                  }}
-                            className="gap-2"
-                          >
-                            📖 Открыть
-                          </Button>
-                          <Button
-                            variant="outline"
-                                  size="sm"
-                            onClick={() => {
-                                    if (confirm('Вы уверены, что хотите удалить этот урок?')) {
-                                deleteSavedLesson(lesson.id);
-                              }
-                            }}
-                                  className="gap-2 text-red-600 hover:text-red-700"
-                          >
-                            🗑️ Удалить
-                          </Button>
-                        </div>
-                      </div>
-                        </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-        </div>
         </div>
     </div>
   );

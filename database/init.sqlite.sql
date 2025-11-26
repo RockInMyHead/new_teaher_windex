@@ -3,44 +3,9 @@
 -- Run this after schema.sqlite.sql to populate initial data
 -- =====================================================
 
--- Insert sample courses
-INSERT OR IGNORE INTO courses (id, title, description, subject, grade, difficulty_level, total_lessons, estimated_hours, icon_name)
-VALUES
-  -- Regular school courses
-  ('physics-5', 'Физика для 5 класса', 'Вводный курс физики для пятого класса с основами механики, электричества и оптики.', 'physics', 5, 'easy', 34, 68, 'Atom'),
-  ('math-5', 'Математика для 5 класса', 'Базовый курс математики: дроби, уравнения, геометрия.', 'math', 5, 'medium', 40, 80, 'Calculator'),
-  ('english-5', 'Английский 5 класс', 'Начальный курс английского языка для 5 класса.', 'english', 5, 'easy', 36, 72, 'Globe'),
-  ('russian-8', 'Русский язык для 8 класса', 'Курс русского языка для восьмого класса с углубленным изучением орфографии и синтаксиса.', 'russian', 8, 'medium', 42, 84, 'BookOpen'),
-  ('biology-9', 'Биология для 9 класса', 'Курс биологии для девятого класса: анатомия, генетика, эволюция.', 'biology', 9, 'medium', 38, 76, 'Dna'),
-  
-  -- Exam courses
-  ('exam-ege-math', 'Математика (профиль) ЕГЭ', 'Подготовка к профильной математике ЕГЭ. Полный курс с разбором всех типов заданий.', 'math', NULL, 'hard', 50, 100, 'Calculator'),
-  ('exam-ege-russian', 'Русский язык ЕГЭ', 'Подготовка к ЕГЭ по русскому языку. Орфография, пунктуация, сочинение.', 'russian', NULL, 'hard', 45, 90, 'BookOpen'),
-  ('exam-oge-math', 'Математика ОГЭ', 'Подготовка к ОГЭ по математике. Алгебра и геометрия.', 'math', NULL, 'medium', 40, 80, 'Calculator'),
-  ('exam-oge-biology', 'Биология ОГЭ', 'Подготовка к ОГЭ по биологии. Все разделы школьного курса.', 'biology', NULL, 'medium', 35, 70, 'Dna');
+-- Courses are now stored in config files, not database
 
--- Update exam_type for exam courses
-UPDATE courses SET exam_type = 'ЕГЭ' WHERE id LIKE 'exam-ege-%';
-UPDATE courses SET exam_type = 'ОГЭ' WHERE id LIKE 'exam-oge-%';
-
--- Insert sample lessons for Physics 5 class
-INSERT OR IGNORE INTO lessons (course_id, lesson_number, title, topic, description, content)
-VALUES
-  ('physics-5', 1, 'Что такое физика и зачем она нужна', 'Вводный модуль: физика как наука', 'Определение физики; место физики среди наук; роль физики в технике и быту; примеры физических объектов и процессов', 'Физика - это наука о природе, изучающая простейшие и вместе с тем наиболее общие свойства материального мира...'),
-  ('physics-5', 2, 'Физические величины и их измерение', 'Основы измерений', 'Что такое физическая величина; единицы измерения; измерительные приборы', 'В физике мы изучаем различные физические величины - характеристики объектов и процессов...'),
-  ('physics-5', 3, 'Строение вещества', 'Молекулы и атомы', 'Молекулярное строение вещества; три состояния вещества', 'Все вещества состоят из мельчайших частиц - молекул и атомов...');
-
--- Insert sample lessons for Math EGE
-INSERT OR IGNORE INTO lessons (course_id, lesson_number, title, topic, description, content)
-VALUES
-  ('exam-ege-math', 1, 'Введение в математику ЕГЭ', 'Основные понятия и термины', 'Знакомство с основными понятиями и терминами математики ЕГЭ. Числа, множества, функции. Подготовка к успешной сдаче экзамена.', 'Профильная математика ЕГЭ - один из самых сложных экзаменов. Мы начнем с основ и постепенно перейдем к сложным задачам...'),
-  ('exam-ege-math', 2, 'Алгебраические преобразования', 'Тождественные преобразования выражений', 'Преобразование алгебраических выражений, приведение подобных слагаемых, разложение на множители.', 'Алгебраические преобразования - фундамент для решения большинства задач ЕГЭ...');
-
--- Insert sample lessons for Biology OGE
-INSERT OR IGNORE INTO lessons (course_id, lesson_number, title, topic, description, content)
-VALUES
-  ('exam-oge-biology', 1, 'Введение в биологию ОГЭ', 'Основные понятия и термины', 'Знакомство с основными понятиями и терминами биологии ОГЭ. Клетка, ткани, органы, организмы. Подготовка к успешной сдаче экзамена.', 'Биология ОГЭ охватывает все основные разделы школьного курса биологии...'),
-  ('exam-oge-biology', 2, 'Клетка - основа жизни', 'Строение и функции клетки', 'Строение растительной и животной клетки. Клеточная оболочка, цитоплазма, ядро. Органоиды клетки и их функции.', 'Клетка - элементарная единица жизни. Все живые организмы состоят из клеток...');
+-- Lessons are now dynamic and stored in config, not database
 
 -- Insert default achievements
 INSERT OR IGNORE INTO achievements (name, title, description, icon_name, criteria_type, criteria_value, points_reward)

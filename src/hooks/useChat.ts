@@ -1,13 +1,84 @@
 /**
  * useChat Hook - Manage chat state and operations
+ * With database persistence for chat history via sessionService
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Message, ChatCompletionRequest, UseChatReturn, AppError } from '@/types';
 import { chatService } from '@/services/api/chatService';
 import { handleApiError, getUserFriendlyErrorMessage } from '@/services/api/errorHandler';
 import { logger } from '@/utils/logger';
 import { learningProgressService } from '@/services';
+import { sessionService } from '@/services/sessionService';
+
+const MAX_STORED_MESSAGES = 50;
+
+/**
+ * Find homework assignments in chat history
+ */
+function findHomeworkInHistory(messages: Message[]): string | null {
+  // Look for messages containing homework assignments from ASSISTANT only
+  // Must contain specific homework assignment patterns
+
+  for (const message of messages.slice().reverse()) { // Start from most recent
+    // Only check assistant messages for homework assignments
+    if (message.role !== 'assistant') continue;
+
+    const content = message.content.toLowerCase();
+
+    // Must contain explicit homework assignment patterns
+    const homeworkPatterns = [
+      'домашнее задание',
+      'дз:',
+      'домашняя работа',
+      'выполните дома',
+      'задание на дом',
+      'для следующего урока'
+    ];
+
+    // Must have homework indicators (blanks, tasks, exercises)
+    const homeworkIndicators = ['___', 'вставьте', 'заполните', 'определите', 'напишите', 'решите'];
+
+    const hasHomeworkPattern = homeworkPatterns.some(pattern => content.includes(pattern));
+    const hasHomeworkIndicators = homeworkIndicators.some(indicator => message.content.includes(indicator));
+
+    // Additional check: message should be reasonably long (not just a greeting)
+    const isReasonableLength = message.content.length > 100;
+
+    if (hasHomeworkPattern && hasHomeworkIndicators && isReasonableLength) {
+      console.log('📚 Found valid homework assignment in history:', message.content.substring(0, 150) + '...');
+      return message.content;
+    }
+  }
+
+  console.log('📝 No valid homework assignments found in history');
+  return null;
+}
+
+/**
+ * Check if homework needs to be checked based on chat history
+ */
+function shouldCheckHomework(messages: Message[]): boolean {
+  const homework = findHomeworkInHistory(messages);
+  if (!homework) return false;
+
+  // Check if homework was already checked/reviewed
+  const recentMessages = messages.slice(-10); // Last 10 messages
+  const checkedKeywords = ['проверим', 'проверили', 'молодец', 'отлично', 'правильно', 'неправильно'];
+
+  for (const message of recentMessages) {
+    if (message.role === 'assistant') {
+      const content = message.content.toLowerCase();
+      if (checkedKeywords.some(keyword => content.includes(keyword))) {
+        console.log('✅ Homework appears to have been checked already');
+        return false; // Homework was already checked
+      }
+    }
+  }
+
+  console.log('📝 Homework needs to be checked');
+  return true;
+}
 
 /**
  * Функция пост-обработки текста для исправления распространенных ошибок
@@ -63,6 +134,8 @@ interface UseChatOptions {
   onMessageReceived?: (message: Message) => void;
   onError?: (error: AppError) => void;
   maxMessages?: number;
+  /** Course ID for per-course chat history - REQUIRED for proper history separation */
+  courseId?: string;
 }
 
 export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
@@ -70,8 +143,17 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
     onMessageReceived,
     onError,
     maxMessages = 100,
+    courseId,
   } = options;
 
+  // Determine the effective course ID - use 'general' for general chat
+  const effectiveCourseId = courseId || 'general';
+  
+  // Store courseId in ref to track changes
+  const courseIdRef = useRef(effectiveCourseId);
+  const isInitializedRef = useRef(false);
+
+  // State
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<AppError | null>(null);
@@ -80,11 +162,58 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
+  // Load messages from database on mount and when courseId changes
+  useEffect(() => {
+    const loadMessages = async () => {
+      console.log('🚀 useChat loading messages for courseId:', effectiveCourseId);
+      try {
+        const history = await sessionService.getChatHistory(effectiveCourseId, MAX_STORED_MESSAGES);
+        const loadedMessages = history.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp),
+        }));
+        console.log('📂 Chat history loaded from DB:', loadedMessages.length, 'messages for course:', effectiveCourseId);
+        setMessages(loadedMessages);
+      } catch (error) {
+        console.error('Failed to load chat history from DB:', error);
+        setMessages([]);
+      }
+      isInitializedRef.current = true;
+    };
+
+    if (courseIdRef.current !== effectiveCourseId || !isInitializedRef.current) {
+      console.log('🔄 Course changed or initializing:', effectiveCourseId);
+      courseIdRef.current = effectiveCourseId;
+      loadMessages();
+    }
+  }, [effectiveCourseId]);
+
+  // Save messages to database whenever they change (debounced)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (!isInitializedRef.current || messages.length === 0) return;
+    
+    // Debounce saves to avoid too many API calls
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(async () => {
+      console.log('💾 Saving chat history to DB:', messages.length, 'messages for course:', effectiveCourseId);
+      await sessionService.saveChatHistory(effectiveCourseId, messages as any);
+    }, 500);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [messages, effectiveCourseId]);
+
   /**
    * Send message to AI with streaming
    */
   const sendMessage = useCallback(
-    async (content: string, systemPrompt: string, model: string = 'gpt-4o', images?: File[]) => {
+    async (content: string, systemPrompt: string, model: string = 'gpt-5.1', images?: File[]) => {
       try {
         setIsLoading(true);
         setError(null);
@@ -151,12 +280,50 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
             };
           });
 
+        // Check for homework in history and add to system prompt
+        const homeworkInfo = findHomeworkInHistory(messagesRef.current);
+        const shouldCheckHW = shouldCheckHomework(messagesRef.current);
+
+        let enhancedSystemPrompt = systemPrompt;
+        
+        // Добавляем инструкции для распознавания изображений
+        if (images && images.length > 0) {
+          enhancedSystemPrompt += `
+
+ВАЖНО: Ученик прислал изображение (возможно, фото домашней работы или рукописного текста).
+
+ИНСТРУКЦИИ ПО РАСПОЗНАВАНИЮ ИЗОБРАЖЕНИЙ:
+1. Внимательно изучи изображение и распознай весь текст (включая рукописный)
+2. Если это домашняя работа - проверь её и укажи на ошибки
+3. Объясни, что написано неправильно и как исправить
+4. Похвали за правильные ответы
+5. Если текст нечитаемый - попроси переснять фото более качественно
+
+При распознавании рукописного текста:
+- Учитывай особенности детского почерка
+- Если буква похожа на несколько вариантов - выбирай наиболее логичный в контексте
+- Обращай внимание на исправления и зачеркивания`;
+
+          console.log('📝 Enhanced system prompt with image recognition instructions');
+        }
+        
+        if (homeworkInfo && shouldCheckHW) {
+          enhancedSystemPrompt += `
+
+ВАЖНО: В истории беседы найдено невыполненное домашнее задание!
+Домашнее задание: "${homeworkInfo}"
+
+Начните урок с проверки этого задания! Спросите ученика, как он справился с заданием.`;
+
+          console.log('📝 Enhanced system prompt with homework check');
+        }
+
         // Wait for all message conversions
         const resolvedChatMessages = await Promise.all(chatMessages);
 
         resolvedChatMessages.unshift({
           role: 'system',
-          content: systemPrompt,
+          content: enhancedSystemPrompt,
         });
 
         // Add current message with images
@@ -165,12 +332,13 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
             images.map(file => fileToBase64(file))
           );
 
-          const content = [
+          // Создаем массив контента с текстом и изображениями
+          const messageContent: Array<{type: 'text', text: string} | {type: 'image_url', image_url: {url: string}}> = [
             { type: 'text' as const, text: content }
           ];
 
           imageUrls.forEach(url => {
-            content.push({
+            messageContent.push({
               type: 'image_url' as const,
               image_url: { url }
             });
@@ -178,7 +346,7 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
 
           resolvedChatMessages.push({
             role: 'user',
-            content,
+            content: messageContent,
           });
         } else {
           resolvedChatMessages.push({
@@ -197,21 +365,24 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
           lessonTitle: lessonContext?.currentLessonTitle
         });
 
+        // Store isLessonChat in a variable accessible to the callback
+        const lessonChatFlag = isLessonChat;
+
         // Настройки для разных типов чата
         const chatSettings = isLessonChat ? {
-          // Образовательный чат - более строгие настройки для качества
+          // Образовательный чат - подробные объяснения требуют больше токенов
           temperature: 0.3,
           top_p: 0.8,
           presence_penalty: 0.2,
           frequency_penalty: 0.2,
-          max_tokens: 2500
+          max_tokens: 4000
         } : {
           // Общий чат - более креативные настройки
           temperature: 0.7,
           top_p: 0.9,
           presence_penalty: 0.1,
           frequency_penalty: 0.1,
-          max_tokens: 2000
+          max_tokens: 10000
         };
 
         // Get AI response with streaming
@@ -235,17 +406,28 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
           timestamp: new Date(),
         });
 
+        let chunkBuffer = '';
+        let lastUpdateTime = Date.now();
+
         await chatService.sendMessageStream(request, (chunk: string) => {
           console.log('📦 Received chunk:', chunk, `(length: ${chunk.length})`);
+          chunkBuffer += chunk;
+
+          // Update UI at most every 50ms to avoid too frequent re-renders
+          const now = Date.now();
+          if (now - lastUpdateTime >= 50 || chunk.includes('\n')) {
           setStreamingMessage(prev => {
-            const newContent = (prev?.content || '') + chunk;
+              const newContent = (prev?.content || '') + chunkBuffer;
             console.log('📝 Updated streaming message, total length:', newContent.length);
+              chunkBuffer = '';
+              lastUpdateTime = now;
             return {
               role: 'assistant',
               content: newContent,
               timestamp: prev?.timestamp || new Date(),
             };
           });
+          }
         });
 
         // Finalize streaming message
@@ -253,7 +435,7 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
           if (!prev) return null;
 
           // Применяем пост-обработку для исправления ошибок в образовательном контенте
-          const processedContent = isLessonChat ? postProcessText(prev.content) : prev.content;
+          const processedContent = lessonChatFlag ? postProcessText(prev.content) : prev.content;
           const processedMessage = {
             ...prev,
             content: processedContent
@@ -303,12 +485,13 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
   }, [onMessageReceived, maxMessages]);
 
   /**
-   * Clear all messages
+   * Clear all messages (including database) for current course
    */
-  const clearMessages = useCallback(() => {
+  const clearMessages = useCallback(async () => {
     setMessages([]);
-    logger.debug('Messages cleared');
-  }, []);
+    await sessionService.clearChatHistory(effectiveCourseId);
+    logger.debug('Messages cleared for course:', effectiveCourseId);
+  }, [effectiveCourseId]);
 
   /**
    * Update message

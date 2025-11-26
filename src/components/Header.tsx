@@ -49,7 +49,7 @@ const HeaderWithHero = ({ title, subtitle, showHero = true }: HeaderWithHeroProp
               <Button
                 variant="ghost"
                 className="flex items-center gap-2"
-                onClick={() => navigate('/courses')}
+                onClick={() => navigate('/library')}
               >
                 <Home className="w-4 h-4" />
                 Библиотека
@@ -104,7 +104,7 @@ const HeaderWithHero = ({ title, subtitle, showHero = true }: HeaderWithHeroProp
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem
                   onClick={() => {
-                    navigate('/courses');
+                    navigate('/library');
                     setIsMobileMenuOpen(false);
                   }}
                   className="flex items-center gap-2"
@@ -260,7 +260,7 @@ const Header = () => {
             <Button
               variant="ghost"
               className="flex items-center gap-2"
-              onClick={() => navigate('/courses')}
+              onClick={() => navigate('/library')}
             >
               <BookOpen className="w-4 h-4" />
               Библиотека
@@ -313,7 +313,7 @@ const Header = () => {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem
-                  onClick={() => navigate('/courses')}
+                  onClick={() => navigate('/library')}
                   className="flex items-center gap-2"
                 >
                   <BookOpen className="w-4 h-4" />

@@ -22,10 +22,13 @@ export const ChatContainer = React.forwardRef<any, ChatContainerProps>(
     maxMessages = 100,
     onChatStart,
     onChatEnd,
+    isLessonMode = false,
+    courseId
   }: ChatContainerProps, ref) => {
-    // State management
-    const { messages, isLoading, sendMessage: sendChatMessage, error: chatError, addMessage, streamingMessage } = useChat({
+    // State management - pass courseId for per-course chat history
+    const { messages, isLoading, sendMessage: sendChatMessage, error: chatError, addMessage, streamingMessage, clearMessages } = useChat({
       maxMessages,
+      courseId,
     });
 
     // Expose addMessage via ref for external use
@@ -70,7 +73,7 @@ export const ChatContainer = React.forwardRef<any, ChatContainerProps>(
           const messageContent = content;
 
           // Send message to AI with images
-          await sendChatMessage(messageContent, systemPrompt, 'gpt-4o-mini', images);
+          await sendChatMessage(messageContent, systemPrompt, 'gpt-5.1', images);
         } catch (error) {
           logger.error('Failed to send message', error as Error);
         }
@@ -150,6 +153,7 @@ export const ChatContainer = React.forwardRef<any, ChatContainerProps>(
             messages={messages}
             isLoading={isLoading}
             streamingMessage={streamingMessage}
+            isLessonMode={isLessonMode}
           />
         </div>
 

@@ -70,7 +70,7 @@ class ExamService {
   /**
    * Delete exam course
    */
-  async deleteExamCourse(examCourseId: string): Promise<{ message: string }> {
+  async deleteExamCourse(userId: string, examCourseId: string): Promise<{ message: string }> {
     return api.delete(`/exams/${examCourseId}`);
   }
 
@@ -85,34 +85,6 @@ class ExamService {
     return api.get(`/exams/${userId}/${examType}/${subject}`);
   }
 
-  /**
-   * Save exam courses to localStorage (for backward compatibility)
-   */
-  saveExamCoursesToLocalStorage(courses: ExamCourse[]): void {
-    localStorage.setItem('examCourses', JSON.stringify(courses));
-  }
-
-  /**
-   * Get exam courses from localStorage
-   */
-  getExamCoursesFromLocalStorage(): ExamCourse[] | null {
-    const data = localStorage.getItem('examCourses');
-    if (!data) return null;
-    
-    try {
-      return JSON.parse(data);
-    } catch (error) {
-      console.error('Error parsing exam courses from localStorage:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Clear exam courses from localStorage
-   */
-  clearLocalStorage(): void {
-    localStorage.removeItem('examCourses');
-  }
 }
 
 export const examService = new ExamService();

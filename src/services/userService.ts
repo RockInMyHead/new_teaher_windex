@@ -59,29 +59,7 @@ class UserService {
    * Login user
    */
   async login(data: LoginData): Promise<{ user: User }> {
-    const result = await api.post<{ user: User }>('/users/login', data);
-    
-    // Store user in localStorage for session persistence
-    if (result.user) {
-      localStorage.setItem('user', JSON.stringify(result.user));
-    }
-    
-    return result;
-  }
-
-  /**
-   * Get current user from localStorage
-   */
-  getCurrentUser(): User | null {
-    const userStr = localStorage.getItem('user');
-    if (!userStr) return null;
-    
-    try {
-      return JSON.parse(userStr);
-    } catch (error) {
-      console.error('Error parsing user from localStorage:', error);
-      return null;
-    }
+    return api.post<{ user: User }>('/users/login', data);
   }
 
   /**
@@ -95,15 +73,7 @@ class UserService {
    * Update user profile
    */
   async updateUser(userId: string, data: Partial<User>): Promise<{ user: User }> {
-    const result = await api.put<{ user: User }>(`/users/${userId}`, data);
-    
-    // Update localStorage
-    const currentUser = this.getCurrentUser();
-    if (currentUser && currentUser.id === userId) {
-      localStorage.setItem('user', JSON.stringify({ ...currentUser, ...result.user }));
-    }
-    
-    return result;
+    return api.put<{ user: User }>(`/users/${userId}`, data);
   }
 
   /**
@@ -117,15 +87,7 @@ class UserService {
     totalPoints?: number;
     level?: number;
   }): Promise<{ stats: any }> {
-    const result = await api.put(`/users/${userId}/stats`, stats);
-    
-    // Update localStorage
-    const currentUser = this.getCurrentUser();
-    if (currentUser && currentUser.id === userId) {
-      localStorage.setItem('user', JSON.stringify({ ...currentUser, ...result.stats }));
-    }
-    
-    return result;
+    return api.put(`/users/${userId}/stats`, stats);
   }
 
   /**
@@ -143,13 +105,6 @@ class UserService {
     preferences: Partial<UserPreferences>
   ): Promise<{ preferences: UserPreferences }> {
     return api.put(`/users/${userId}/preferences`, preferences);
-  }
-
-  /**
-   * Logout user
-   */
-  logout(): void {
-    localStorage.removeItem('user');
   }
 }
 

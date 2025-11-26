@@ -42,6 +42,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ChatInputProps } from './types';
 import { logger } from '@/utils/logger';
+import { OpenAITTS } from '@/lib/openaiTTS';
 
 export const ChatInput = React.memo(
   ({
@@ -65,6 +66,9 @@ export const ChatInput = React.memo(
 
     const handleSendMessage = async () => {
       if ((!message.trim() && selectedImages.length === 0) || isLoading || isSending) return;
+
+      // Обновляем время пользовательского взаимодействия для TTS
+      OpenAITTS.updateUserInteraction();
 
       try {
         setIsSending(true);
@@ -94,6 +98,7 @@ export const ChatInput = React.memo(
     const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+        OpenAITTS.updateUserInteraction();
         handleSendMessage();
       }
     };
@@ -331,7 +336,16 @@ export const ChatInput = React.memo(
           />
 
           <Button
-            onClick={message.trim() ? handleSendMessage : (isRecording ? stopRecording : startRecording)}
+            onClick={() => {
+              OpenAITTS.updateUserInteraction();
+              if (message.trim()) {
+                handleSendMessage();
+              } else if (isRecording) {
+                stopRecording();
+              } else {
+                startRecording();
+              }
+            }}
             disabled={isButtonDisabled && !isRecording}
             size="icon"
             title={message.trim() ? "Отправить (Enter)" : (isRecording ? "Остановить запись" : "Начать запись голоса")}

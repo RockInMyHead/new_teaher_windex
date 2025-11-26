@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Code, Languages, Calculator, Palette, Globe, ArrowLeft, Play, BookOpen, Trophy, MessageCircle, Award, User, Atom, Brain, Loader } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { sessionService } from '@/services/sessionService';
 
 // Функция для получения иконки по имени
 const getIconByName = (iconName: string) => {
@@ -59,19 +60,28 @@ const CoursesPage = () => {
     
     try {
       console.log('📚 Loading user learning plans for user:', user?.id);
-      const response = await fetch(`/api/db/learning-plans/user/${user?.id}`);
+      const response = await fetch(`/api/learning-plans/user/${user?.id}`);
 
       console.log('📡 API Response status:', response.status, 'content-type:', response.headers.get('content-type'));
 
       if (response.ok) {
+        // Check content-type before parsing
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          console.error('❌ Server returned non-JSON response. Content-Type:', contentType);
+          const textResponse = await response.text();
+          console.error('📄 Non-JSON response:', textResponse.substring(0, 300));
+          console.warn('⚠️ Backend may not be running or route not found');
+          return; // Exit early, don't try to parse
+        }
+
         let data;
         try {
           data = await response.json();
           console.log('📦 Raw response data:', data);
         } catch (jsonError) {
           console.error('❌ Failed to parse JSON response:', jsonError);
-          const textResponse = await response.text();
-          console.error('📄 Raw text response:', textResponse.substring(0, 500));
+          // Don't try to read text again - body already consumed
           throw new Error('Invalid JSON in response');
         }
 
@@ -86,9 +96,8 @@ const CoursesPage = () => {
             plansMap[plan.course_id.toString()] = plan; // Добавляем и как строку
           });
           setSavedPlans(plansMap);
-          // Сохраняем планы в localStorage для использования в CourseDetail
-          localStorage.setItem('userLearningPlans', JSON.stringify(plansMap));
-          console.log('💾 Saved plans to localStorage:', Object.keys(plansMap));
+          // Plans are loaded from API when needed in CourseDetail
+          console.log('📋 Loaded plans:', Object.keys(plansMap));
 
           // Создаем виртуальные курсы из планов
           const virtualCoursesFromPlans = data.plans?.map((plan: any) => {
@@ -154,8 +163,24 @@ const CoursesPage = () => {
     });
 
     try {
-      // Сохраняем данные курса в localStorage для передачи на страницу деталей
-      const courseData = {
+      // Получаем полные данные курса из API для корректной работы CourseDetail
+      console.log('📡 Loading full course data from API for course:', course.id);
+      let fullCourseData = null;
+
+      try {
+        const response = await fetch(`/api/courses/${course.id}`);
+        if (response.ok) {
+          fullCourseData = await response.json();
+          console.log('✅ Full course data loaded from API:', fullCourseData);
+        } else {
+          console.warn('⚠️ Failed to load full course data, using basic data');
+        }
+      } catch (apiError) {
+        console.warn('⚠️ API error loading course data:', apiError);
+      }
+
+      // Сохраняем полные данные курса в localStorage (или базовые если API не доступен)
+      const courseData = fullCourseData?.course || {
         id: course.id,
         title: course.title,
         description: course.description,
@@ -165,11 +190,14 @@ const CoursesPage = () => {
         modules: course.modules,
         completedModules: course.completedModules,
         students: course.students,
-        isVirtual: course.isVirtual
+        isVirtual: course.isVirtual,
+        subject: 'general', // добавляем базовые поля
+        lessons: []
       };
 
-      localStorage.setItem('selectedCourseData', JSON.stringify(courseData));
-      console.log('💾 Saved course data to localStorage:', courseData);
+      // Save course data to user state in DB
+      await sessionService.saveUserState({ selectedCourseData: courseData });
+      console.log('💾 Saved course data to DB:', courseData);
 
       // Перейти на страницу выбора типа обучения
       console.log('📖 Opening learning type selection for course:', course.title, 'ID:', course.id);

@@ -12,6 +12,24 @@ export class OpenAITTS {
   private static currentAudio: HTMLAudioElement | null = null;
   private static videoElement: HTMLVideoElement | null = null;
   private static currentAudioUrl: string | null = null;
+  private static interactionListenersAttached = false;
+
+  // Инициализация отслеживания пользовательского взаимодействия
+  private static initInteractionTracking(): void {
+    if (this.interactionListenersAttached || typeof window === 'undefined') return;
+
+    const updateInteraction = () => this.updateUserInteraction();
+
+    // Отслеживаем различные типы взаимодействия
+    const events = ['click', 'keydown', 'touchstart', 'mousedown', 'scroll'];
+    events.forEach(event => {
+      window.addEventListener(event, updateInteraction, { passive: true });
+    });
+
+    // Отмечаем, что обработчики установлены
+    this.interactionListenersAttached = true;
+    console.log('👆 TTS interaction tracking initialized');
+  }
 
   // Получить правильный MIME тип для аудио формата
   private static getMimeType(format: string): string {
@@ -94,8 +112,77 @@ export class OpenAITTS {
     return this.speakText(text, options);
   }
 
+  // Проверка на user activation (необходима для autoplay)
+  private static hasUserActivation(): boolean {
+    // Проверяем современный API userActivation
+    if (typeof navigator !== 'undefined' && 'userActivation' in navigator) {
+      return (navigator as any).userActivation?.hasBeenActive || false;
+    }
+
+    // Fallback: проверяем на недавнее взаимодействие (click, keypress, etc.)
+    // Это не идеально, но лучше чем ничего
+    const now = Date.now();
+    const lastInteraction = (window as any)._ttsLastInteraction || 0;
+    return (now - lastInteraction) < 5000; // 5 секунд
+  }
+
+  // Показать предупреждение об autoplay
+  private static showAutoplayWarning(): void {
+    console.warn('🔊 TTS заблокирован политикой autoplay браузера');
+    console.warn('💡 Для включения звука нажмите на любую кнопку на странице');
+
+    // Показываем toast уведомление (если есть система уведомлений)
+    if (typeof window !== 'undefined' && (window as any).showToast) {
+      (window as any).showToast('Для включения голоса нажмите на любую кнопку на странице', 'warning');
+    }
+
+    // Диспатчим событие для компонентов
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tts-autoplay-blocked', {
+        detail: { message: 'TTS заблокирован политикой autoplay браузера' }
+      }));
+    }
+  }
+
+  // Обновить время последнего взаимодействия
+  static updateUserInteraction(): void {
+    if (typeof window !== 'undefined') {
+      (window as any)._ttsLastInteraction = Date.now();
+    }
+  }
+
+  // Проверить и активировать TTS после взаимодействия пользователя
+  static async tryActivateTTS(): Promise<boolean> {
+    console.log('🔄 Checking TTS activation...');
+
+    if (this.hasUserActivation()) {
+      console.log('✅ TTS is now activated');
+      return true;
+    }
+
+    console.log('⏳ TTS still not activated - waiting for user interaction');
+    return false;
+  }
+
+  // Повторно воспроизвести последний заблокированный TTS (после взаимодействия)
+  static async retryLastTTS(): Promise<void> {
+    console.log('🔄 Retrying last TTS after user interaction...');
+
+    if (!this.hasUserActivation()) {
+      console.warn('⚠️ Still no user activation');
+      return;
+    }
+
+    // Здесь можно хранить последний текст для повтора
+    // Пока просто логируем
+    console.log('💡 User can now use TTS normally');
+  }
+
   static async speakText(text: string, options: TTSOptions = {}): Promise<void> {
     console.log('🎙️ OpenAI TTS speakText called with text:', text.substring(0, 50) + '...');
+
+    // Инициализируем отслеживание взаимодействия при первом использовании
+    this.initInteractionTracking();
 
     try {
       // Проверяем доступность OpenAI TTS
@@ -103,6 +190,17 @@ export class OpenAITTS {
         console.error('❌ OpenAI TTS not available - missing API key or browser audio support');
         throw new Error('OpenAI TTS not available: missing API key or browser does not support Audio API');
       }
+
+      // Проверяем user activation для autoplay
+      if (!this.hasUserActivation()) {
+        console.warn('⚠️ No user activation detected - TTS may be blocked by browser autoplay policy');
+        console.warn('💡 User needs to interact with the page first (click, tap, etc.)');
+
+        // Показываем уведомление пользователю
+        this.showAutoplayWarning();
+        return;
+      }
+
       console.log('✅ OpenAI TTS is available');
 
       // Force MP3 format for OpenAI TTS compatibility
@@ -119,51 +217,12 @@ export class OpenAITTS {
       const audioBuffer = await this.generateSpeech(text, options);
       console.log('✅ generateSpeech completed');
 
-      // OpenAI TTS Priority: Force Web Audio API first, then HTML Audio, then speech synthesis
+      // OpenAI TTS Priority: HTML Audio first (more reliable for MP3), then Web Audio API
 
-      console.log('🎵 🎯 PRIORITY: OpenAI TTS - Using Web Audio API (OpenAI voice preferred)...');
+      console.log('🎵 🎯 PRIORITY: OpenAI TTS - Using HTML Audio (more reliable for MP3)...');
 
-      // Always prioritize OpenAI TTS through Web Audio API
+      // Prioritize HTML Audio for better MP3 support
       try {
-        // Initialize AudioContext for OpenAI TTS
-        if (!this.audioContext) {
-          this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-          console.log('✅ AudioContext initialized for OpenAI TTS');
-        }
-
-        // Ensure AudioContext is running for OpenAI TTS
-        if (this.audioContext.state === 'suspended') {
-          await this.audioContext.resume();
-          console.log('✅ AudioContext resumed for OpenAI TTS');
-        }
-
-        // Decode OpenAI TTS audio buffer
-        console.log('🔄 Decoding OpenAI TTS audio buffer...');
-        const decodedBuffer = await this.audioContext.decodeAudioData(audioBuffer.slice());
-        console.log('✅ OpenAI TTS audio decoded, duration:', decodedBuffer.duration, 'seconds');
-
-        // Create and play OpenAI TTS using Web Audio API
-        return new Promise<void>((resolve) => {
-          const source = this.audioContext.createBufferSource();
-          source.buffer = decodedBuffer;
-          source.connect(this.audioContext.destination);
-
-          source.onended = () => {
-            console.log('✅ OpenAI TTS Web Audio playback completed successfully');
-            this.pauseVideo();
-            resolve();
-          };
-
-          console.log('▶️ 🚀 Starting OpenAI TTS playback via Web Audio API...');
-          source.start(0);
-          this.playVideo();
-          console.log('✅ OpenAI TTS Web Audio playback started - using OpenAI voice!');
-        });
-
-      } catch (webAudioError) {
-        console.warn('⚠️ Web Audio API failed for OpenAI TTS:', webAudioError.message);
-        console.log('🔄 OpenAI TTS: Falling back to HTML Audio...');
-
         // Fallback 1: HTML Audio for OpenAI TTS
         try {
           const mimeType = this.getMimeType(options.format || 'mp3');
@@ -183,43 +242,96 @@ export class OpenAITTS {
         }
       };
 
+      // Логируем метаданные аудио после загрузки
+      this.currentAudio.onloadedmetadata = () => {
+        console.log('🎵 Audio metadata loaded:', {
+          duration: this.currentAudio?.duration,
+          readyState: this.currentAudio?.readyState,
+          paused: this.currentAudio?.paused,
+          volume: this.currentAudio?.volume,
+          muted: this.currentAudio?.muted
+        });
+      };
+
+      this.currentAudio.oncanplaythrough = () => {
+        console.log('🎵 Audio can play through, duration:', this.currentAudio?.duration);
+      };
+
       this.currentAudio.onended = () => {
-              console.log('✅ OpenAI TTS HTML Audio playback completed');
+              console.log('✅ OpenAI TTS HTML Audio playback completed, played for:', this.currentAudio?.currentTime, 'seconds');
         this.pauseVideo();
         this.currentAudio = null;
         cleanup();
         resolve();
       };
 
-            this.currentAudio.onerror = () => {
-              console.warn('⚠️ HTML Audio failed for OpenAI TTS, using browser speech synthesis...');
-              // Fallback 2: Speech synthesis (still trying to preserve OpenAI audio)
-              this.fallbackToWAV(audioBuffer, text, resolve, () => resolve(), cleanup);
+            this.currentAudio.onerror = (e) => {
+              console.error('❌ HTML Audio error for OpenAI TTS:', {
+                error: e,
+                errorCode: this.currentAudio?.error?.code,
+                errorMessage: this.currentAudio?.error?.message
+              });
+              console.warn('⚠️ HTML Audio failed for OpenAI TTS, trying Web Audio API...');
+              // Fallback: Web Audio API
+              this.tryWebAudioFallback(audioBuffer, resolve, cleanup);
+            };
+
+            // Добавляем обработчик stalled (аудио застряло)
+            this.currentAudio.onstalled = () => {
+              console.warn('⚠️ Audio stalled - network issues or invalid data');
+            };
+
+            // Добавляем обработчик suspend
+            this.currentAudio.onsuspend = () => {
+              console.log('⏸️ Audio loading suspended');
             };
 
             // Try HTML Audio playback for OpenAI TTS
+            console.log('🎵 Attempting to play audio, current state:', {
+              readyState: this.currentAudio.readyState,
+              paused: this.currentAudio.paused,
+              duration: this.currentAudio.duration,
+              src: this.currentAudio.src.substring(0, 50)
+            });
+            
             const playPromise = this.currentAudio.play();
             if (playPromise) {
               playPromise.then(() => {
-                console.log('✅ OpenAI TTS HTML Audio playback started');
+                console.log('✅ OpenAI TTS HTML Audio playback started, duration:', this.currentAudio?.duration);
           this.playVideo();
-              }).catch(() => {
-                console.warn('⚠️ HTML Audio play failed for OpenAI TTS, using browser speech synthesis...');
-                // Fallback 2: Speech synthesis
-                this.fallbackToWAV(audioBuffer, text, resolve, () => resolve(), cleanup);
+              }).catch((error) => {
+                console.warn('⚠️ HTML Audio play failed for OpenAI TTS:', error.message);
+                if (error.name === 'NotAllowedError') {
+                  console.warn('🚫 Autoplay blocked by browser - user interaction required');
+                  this.showAutoplayWarning();
+                  cleanup();
+                  resolve(); // Resolve anyway to not break the flow
+                  return;
+                }
+                console.warn('⚠️ HTML Audio play failed for OpenAI TTS, trying Web Audio API...');
+                // Fallback: Web Audio API
+                this.tryWebAudioFallback(audioBuffer, resolve, cleanup);
               });
             }
           });
 
         } catch (htmlAudioError) {
           console.warn('⚠️ HTML Audio setup failed for OpenAI TTS:', htmlAudioError.message);
-          console.log('🔄 OpenAI TTS: Using browser speech synthesis as last resort...');
+          console.log('🔄 OpenAI TTS: Trying Web Audio API...');
 
-          // Fallback 2: Speech synthesis
+          // Fallback: Web Audio API
           return new Promise<void>((resolve) => {
-            this.fallbackToWAV(audioBuffer, text, resolve, () => resolve(), () => {});
+            this.tryWebAudioFallback(audioBuffer, resolve, () => {});
           });
         }
+      } catch (playbackError) {
+        console.warn('⚠️ OpenAI TTS playback failed:', playbackError.message);
+        console.log('🔄 OpenAI TTS: Trying Web Audio API as final attempt...');
+
+        // Final fallback: Web Audio API
+        return new Promise<void>((resolve) => {
+          this.tryWebAudioFallback(audioBuffer, resolve, () => {});
+          });
       }
 
     } catch (error) {
@@ -228,6 +340,55 @@ export class OpenAITTS {
       console.log('⚠️ TTS failed completely, providing visual feedback only');
       // Return successfully to prevent app from breaking
       return;
+    }
+  }
+
+  // Web Audio API fallback for OpenAI TTS
+  private static async tryWebAudioFallback(audioBuffer: ArrayBuffer, resolve: () => void, cleanup: () => void): Promise<void> {
+    try {
+      console.log('🔄 OpenAI TTS: Trying Web Audio API as fallback...');
+
+      // Initialize AudioContext for OpenAI TTS
+      if (!this.audioContext) {
+        this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        console.log('✅ AudioContext initialized for OpenAI TTS fallback');
+      }
+
+      // Ensure AudioContext is running for OpenAI TTS
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+        console.log('✅ AudioContext resumed for OpenAI TTS fallback');
+      }
+
+      // Decode OpenAI TTS audio buffer
+      console.log('🔄 Decoding OpenAI TTS audio buffer via Web Audio...');
+      const decodedBuffer = await this.audioContext.decodeAudioData(audioBuffer.slice(0));
+      console.log('✅ OpenAI TTS audio decoded, duration:', decodedBuffer.duration, 'seconds');
+
+      // Create and play OpenAI TTS using Web Audio API
+      const source = this.audioContext.createBufferSource();
+      source.buffer = decodedBuffer;
+      source.connect(this.audioContext.destination);
+
+      source.onended = () => {
+        console.log('✅ OpenAI TTS Web Audio playback completed successfully');
+        this.pauseVideo();
+        cleanup();
+        resolve();
+      };
+
+      console.log('▶️ 🚀 Starting OpenAI TTS playback via Web Audio API...');
+      source.start(0);
+      this.playVideo();
+      console.log('✅ OpenAI TTS Web Audio playback started - using OpenAI voice!');
+
+    } catch (webAudioError) {
+      console.warn('⚠️ Web Audio API fallback also failed:', webAudioError.message);
+      console.log('🔄 OpenAI TTS: Using browser speech synthesis as last resort...');
+
+      // Final fallback: Browser speech synthesis
+      this.fallbackToBrowserTTS('', resolve);
+      cleanup();
     }
   }
 
@@ -369,6 +530,39 @@ export class OpenAITTS {
     }
   }
 
+  // Final fallback to browser speech synthesis
+  private static async fallbackToBrowserTTS(text: string, resolve: () => void): Promise<void> {
+    try {
+      console.log('🔄 Using browser speech synthesis as final fallback...');
+
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ru-RU'; // Russian language
+        utterance.rate = 0.8; // Slightly slower for clarity
+        utterance.pitch = 1.0;
+
+        utterance.onend = () => {
+          console.log('✅ Browser speech synthesis completed');
+          resolve();
+        };
+
+        utterance.onerror = (error) => {
+          console.warn('⚠️ Browser speech synthesis failed:', error);
+          resolve(); // Resolve anyway
+        };
+
+        window.speechSynthesis.speak(utterance);
+        console.log('✅ Browser speech synthesis started');
+      } else {
+        console.warn('⚠️ Speech synthesis not supported');
+        resolve();
+      }
+    } catch (error) {
+      console.error('❌ Browser speech synthesis error:', error);
+      resolve();
+    }
+  }
+
   // Fallback to speech synthesis if MP3 fails
   private static async fallbackToWAV(audioBuffer: ArrayBuffer, text: string, resolve: () => void, reject: (error: Error) => void, cleanup: () => void) {
     try {
@@ -424,15 +618,14 @@ export async function getBestSupportedFormat(): Promise<string> {
 
 // Функция для проверки доступности TTS
 export function isTTSAvailable(): boolean {
-  // Проверяем наличие API ключа
-  const hasApiKey = !!import.meta.env.VITE_OPENAI_API_KEY;
-
   // Проверяем поддержку Audio API в браузере
+  // API ключ проверяется на сервере при фактическом запросе
   const hasAudioSupport = typeof Audio !== 'undefined' &&
                          typeof AudioContext !== 'undefined' &&
-                         typeof window !== 'undefined';
+                         typeof window !== 'undefined' &&
+                         typeof fetch !== 'undefined';
 
-  return hasApiKey && hasAudioSupport;
+  return hasAudioSupport;
 }
 
 // Функция для проверки, разрешено ли автоматическое воспроизведение аудио

@@ -24,11 +24,6 @@ export {
 
 // Middleware
 export {
-  persistChatState,
-  restoreChatState,
-  persistAssessmentState,
-  restoreAssessmentState,
-  clearPersistedState,
   exportStoreState,
   logStateChange,
   initDevTools,

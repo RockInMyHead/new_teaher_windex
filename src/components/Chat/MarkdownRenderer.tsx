@@ -5,11 +5,27 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 interface MarkdownRendererProps {
   content: string;
   isStreaming?: boolean;
 }
+
+// Helper function to add keys to React elements recursively
+const addKeysToChildren = (children: React.ReactNode, prefix: string = ''): React.ReactNode => {
+  return React.Children.map(children, (child, index) => {
+    if (React.isValidElement(child)) {
+      const key = `${prefix}-${index}-${Math.random().toString(36).substr(2, 5)}`;
+      return React.cloneElement(child, {
+        key,
+        children: child.props.children ? addKeysToChildren(child.props.children, key) : child.props.children
+      });
+    }
+    return child;
+  });
+};
 
 export const MarkdownRenderer = React.memo(({ content, isStreaming = false }: MarkdownRendererProps) => {
   // Нормализуем текст для правильной обработки UTF-8
@@ -18,9 +34,24 @@ export const MarkdownRenderer = React.memo(({ content, isStreaming = false }: Ma
   return (
     <div className="prose prose-sm max-w-none dark:prose-invert">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, {
+          throwOnError: false,
+          errorColor: '#cc0000',
+          fleqn: false,
+          macros: {},
+          trust: false
+        }]]}
         children={normalizedContent}
         components={{
+          // Math components
+          'math': ({ children }) => (
+            <span className="inline-math">{children}</span>
+          ),
+          'inlineMath': ({ children }) => (
+            <span className="inline-math">{children}</span>
+          ),
+
           // Simplified components without extra icons and animations
           h1: ({ children }) => (
             <h1 className="text-2xl font-bold mb-4 mt-6 text-foreground">
@@ -41,21 +72,6 @@ export const MarkdownRenderer = React.memo(({ content, isStreaming = false }: Ma
             <h4 className="text-base font-medium mb-2 mt-3 text-foreground">
               {children}
             </h4>
-          ),
-          ul: ({ children }) => (
-            <ul className="list-disc list-inside space-y-1 mb-3 ml-4">
-              {children}
-            </ul>
-          ),
-          ol: ({ children }) => (
-            <ol className="list-decimal list-inside space-y-1 mb-3 ml-4">
-              {children}
-            </ol>
-          ),
-          li: ({ children }) => (
-            <li className="text-sm">
-              {children}
-            </li>
           ),
           p: ({ children }) => (
             <p className="mb-3 leading-relaxed text-sm">{children}</p>
@@ -102,6 +118,23 @@ export const MarkdownRenderer = React.memo(({ content, isStreaming = false }: Ma
             <td className="border border-border px-3 py-2 text-sm">
               {children}
             </td>
+          ),
+
+          // List components with proper keys for nested lists
+          ul: ({ children }) => (
+            <ul className="list-disc list-inside space-y-1 my-3 ml-4">
+              {addKeysToChildren(children, 'ul')}
+            </ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal list-inside space-y-1 my-3 ml-4">
+              {addKeysToChildren(children, 'ol')}
+            </ol>
+          ),
+          li: ({ children }) => (
+            <li className="leading-relaxed">
+              {children}
+            </li>
           ),
         }}
       >

@@ -68,27 +68,19 @@ const ExamAddCourse: React.FC = () => {
       const newCourses = selectedSubjects.map(subjectId => {
         const subject = subjects.find(s => s.id === subjectId);
         return {
-          id: `${examTypeName}-${subjectId}-${Date.now()}`,
           examType: examTypeName,
           subject: subject?.name || subjectId,
-          progress: 0,
           totalTopics: 50, // Default value
-          completedTopics: 0,
-          lastStudied: new Date().toLocaleDateString('ru-RU'),
         };
       });
 
       // Add courses via API
-      await examService.addBulkExamCourses(userId, newCourses);
+      const result = await examService.addBulkExamCourses(userId, newCourses);
 
-      // Navigate to select mode for the first added course
-      if (newCourses.length > 0) {
-        const firstCourse = newCourses[0];
-        navigate(`/course/${firstCourse.id}/select-mode`);
-      } else {
-        // Fallback to exams page if no courses were added
-        navigate('/exams');
-      }
+      console.log('Added exam courses:', result.examCourses);
+
+      // Navigate back to exams page to show the added courses
+      navigate('/exams');
     } catch (error) {
       console.error('Failed to add exam courses:', error);
       // Fallback to exams page on error
