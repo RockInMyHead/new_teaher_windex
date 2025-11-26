@@ -65,10 +65,45 @@ export const COURSES_CONFIG = [
 ];
 
 export function getFullCourseTitle(courseId: string, level: number): string {
-  const course = COURSES_CONFIG.find(c => c.id === courseId.split('-')[0]);
-  if (course) {
+  // Сначала попробуем распарсить courseId правильно
+  const { subject } = parseCourseId(courseId);
+
+  // Для экзаменационных курсов возвращаем специальный формат
+  if (courseId.startsWith('ЕГЭ-') || courseId.startsWith('ОГЭ-')) {
+    const examType = courseId.startsWith('ЕГЭ-') ? 'ЕГЭ' : 'ОГЭ';
+    const course = COURSES_CONFIG.find(c => c.id === subject);
+    if (course) {
+      return `${course.title} ${examType}`;
+    }
+    // Если курс не найден, попробуем извлечь название из ID
+    const parts = courseId.split('-');
+    if (parts.length >= 2) {
+      const subjectName = parts[1];
+      // Преобразуем обратно в читаемое название
+      const subjectNames: { [key: string]: string } = {
+        'математика': 'Математика',
+        'физика': 'Физика',
+        'химия': 'Химия',
+        'биология': 'Биология',
+        'русский': 'Русский язык',
+        'английский': 'Английский язык',
+        'история': 'История',
+        'география': 'География',
+        'обществознание': 'Обществознание',
+        'информатика': 'Информатика',
+        'литература': 'Литература'
+      };
+      const readableName = subjectNames[subjectName] || subjectName;
+      return `${readableName} ${examType}`;
+    }
+  }
+
+  // Для обычных курсов
+  const course = COURSES_CONFIG.find(c => c.id === subject);
+  if (course && level > 0) {
     return `${course.title} для ${level} класса`;
   }
+
   return `Курс ${courseId} для ${level} класса`;
 }
 

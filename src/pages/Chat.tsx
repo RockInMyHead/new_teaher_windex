@@ -1411,17 +1411,23 @@ ${llmContext?.learningProfile?.currentHomework ? `
           // Build system prompt with learning profile context
           const buildSystemPrompt = () => {
             // Получаем название курса из конфига
-            const { subject, level } = parseCourseId(courseIdFromParams || 'general');
-            const courseTitle = level ? getFullCourseTitle(subject, level) : 'Общий курс';
+            const courseTitle = getFullCourseTitle(courseIdFromParams || 'general', 0);
+            const { subject } = parseCourseId(courseIdFromParams || 'general');
             const courseConfig = getCourseById(subject);
-            
+
+            // Для экзаменационных курсов используем специальный формат промпта
+            let subjectName = courseConfig?.title || subject;
+            if (courseIdFromParams?.startsWith('ЕГЭ-') || courseIdFromParams?.startsWith('ОГЭ-')) {
+              const examType = courseIdFromParams.startsWith('ЕГЭ-') ? 'ЕГЭ' : 'ОГЭ';
+              subjectName = `${courseConfig?.title || subject} ${examType}`;
+            }
+
             // Формируем базовый промпт с названием курса
             const basePrompt = `Ты - Юля, профессиональный школьный учитель с 15-летним стажем.
 
 📚 ТВОЙ ТЕКУЩИЙ КУРС: "${courseTitle}"
-${courseConfig?.description ? `📝 О курсе: ${courseConfig.description}` : ''}
 
-Твоя главная задача - помогать ученику по курсу "${courseTitle}". 
+Твоя главная задача - помогать ученику по предмету "${subjectName}".
 Ты должна:
 - Отвечать на вопросы ученика по темам этого курса
 - Объяснять материал простым и понятным языком
