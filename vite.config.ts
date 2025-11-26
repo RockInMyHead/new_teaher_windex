@@ -23,7 +23,7 @@ export default defineConfig(() => ({
         // Development: proxy на localhost:1038
         target: process.env.NODE_ENV === 'production'
           ? (process.env.PROXY_PORT === '1031'
-              ? 'http://localhost:1031'  // Single-port режим
+              ? 'http://localhost:1031'  // Single-port режим (development)
               : 'https://teacher.windexs.ru')  // Normal production
           : `http://localhost:${process.env.PROXY_PORT || 3001}`, // Development: используем 3001 для backend server
         changeOrigin: true,

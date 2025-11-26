@@ -4,7 +4,7 @@
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' ? 'http://localhost:3001/api' : 'http://localhost:3001/api');
+  (typeof window !== 'undefined' ? 'https://teacher.windexs.ru/api' : 'https://teacher.windexs.ru/api');
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;

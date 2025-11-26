@@ -677,7 +677,7 @@ ${conversationText}
 
     // Try API call with direct fetch
     try {
-      const url = `http://localhost:3001/api/learning-profile/${userId}/${courseId}/assessments`;
+      const url = `https://teacher.windexs.ru/api/learning-profile/${userId}/${courseId}/assessments`;
       console.log('🔍 Direct fetch to:', url);
 
       const fetchResponse = await fetch(url, {
