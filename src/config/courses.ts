@@ -74,9 +74,48 @@ export function getFullCourseTitle(courseId: string, level: number): string {
 
 export function parseCourseId(courseId: string): { subject: string; level: number } {
   const parts = courseId.split('-');
+
+  // Обработка экзаменационных курсов (ЕГЭ-математика-..., ОГЭ-физика-...)
+  if (parts.length >= 3 && (parts[0] === 'ЕГЭ' || parts[0] === 'ОГЭ')) {
+    // Для экзаменационных курсов subject - это вторая часть (предмет)
+    const examType = parts[0];
+    let subject = parts[1];
+
+    // Обработка специальных случаев с пробелами в названии
+    if (subject === 'математика' && parts[2] === '(профиль)') {
+      subject = 'math'; // Математика (профиль)
+    } else if (subject === 'математика' && parts[2] === '(база)') {
+      subject = 'math'; // Математика (база)
+    } else if (subject === 'русский') {
+      subject = 'russian';
+    } else if (subject === 'английский') {
+      subject = 'english';
+    } else if (subject === 'физика') {
+      subject = 'physics';
+    } else if (subject === 'химия') {
+      subject = 'chemistry';
+    } else if (subject === 'биология') {
+      subject = 'biology';
+    } else if (subject === 'история') {
+      subject = 'history';
+    } else if (subject === 'обществознание') {
+      subject = 'social-studies';
+    } else if (subject === 'информатика') {
+      subject = 'informatics';
+    } else if (subject === 'география') {
+      subject = 'geography';
+    } else if (subject === 'литература') {
+      subject = 'literature';
+    }
+
+    return { subject, level: 0 }; // Экзаменационные курсы не имеют уровня класса
+  }
+
+  // Обработка обычных курсов (english-5, russian-7, etc.)
   if (parts.length === 2) {
     return { subject: parts[0], level: parseInt(parts[1]) };
   }
+
   return { subject: courseId, level: 0 }; // Fallback
 }
 
